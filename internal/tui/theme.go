@@ -2,24 +2,28 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Palette.
+// Palette — matches pVPN so the two tools look like one family.
 //
-// Deliberately NOT Proton's brand colours. The Proton Drive integration rules
-// require third-party applications to be visually distinguishable from
-// official Proton products and to use no Proton logos, trademarks or design
-// elements. pdrive uses its own teal/amber identity.
+// Note: the Proton Drive integration rules ask third-party apps to be
+// visually distinguishable from official Proton products. Colours are a
+// grey area (the mandatory textual disclosure below is the hard
+// requirement, and it stays), but if this ever needs to change it should
+// change in pVPN too. Planned: user-configurable themes with
+// terminal-palette detection.
 var (
-	ColorPrimary   = lipgloss.Color("#00B8A9") // teal
-	ColorSecondary = lipgloss.Color("#3FD0C9")
-	ColorAccent    = lipgloss.Color("#F6C177") // amber
+	ColorPrimary   = lipgloss.Color("#6D4AFF")
+	ColorSecondary = lipgloss.Color("#8B6FFF")
+	ColorAccent    = lipgloss.Color("#00F0C8")
 	ColorSuccess   = lipgloss.Color("#2ECC71")
 	ColorWarning   = lipgloss.Color("#F39C12")
 	ColorError     = lipgloss.Color("#E74C3C")
-	ColorBg        = lipgloss.Color("#11161B")
-	ColorBgLight   = lipgloss.Color("#1B2229")
+	ColorMuted     = lipgloss.Color("#6C757D")
+	ColorBg        = lipgloss.Color("#1A1A2E")
+	ColorBgLight   = lipgloss.Color("#232340")
 	ColorFg        = lipgloss.Color("#E8E8E8")
-	ColorFgDim     = lipgloss.Color("#7A8794")
-	ColorBorder    = lipgloss.Color("#2E3A45")
+	ColorFgDim     = lipgloss.Color("#888899")
+	ColorHighlight = lipgloss.Color("#6D4AFF")
+	ColorBorder    = lipgloss.Color("#3D3D5C")
 )
 
 // Shared styles.
@@ -27,6 +31,12 @@ var (
 	StyleTitle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorPrimary)
+
+	StyleBadgeSuccess = lipgloss.NewStyle().
+				Foreground(ColorBg).
+				Background(ColorSuccess).
+				Padding(0, 1).
+				Bold(true)
 
 	StyleSubtitle = lipgloss.NewStyle().
 			Foreground(ColorFgDim)

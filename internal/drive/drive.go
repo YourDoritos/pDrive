@@ -1,0 +1,200 @@
+// Package drive wraps the Proton Drive API behind a small interface.
+//
+// Everything cryptographic lives behind this boundary on purpose. Proton has
+// announced a new Drive cryptographic model for end 2026 / early 2027, and
+// clients implementing only the previous model will stop interoperating. When
+// that lands, this package is the only one that should need to change.
+package drive
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"time"
+
+	bridge "github.com/rclone/Proton-API-Bridge"
+	"github.com/rclone/Proton-API-Bridge/common"
+	proton "github.com/rclone/go-proton-api"
+
+	"github.com/YourDoritos/pdrive/internal/api"
+)
+
+// Node is one entry in the Drive tree.
+type Node struct {
+	LinkID   string
+	ParentID string
+	Name     string
+	Path     string // slash-separated, relative to the Drive root
+	IsDir    bool
+	Size     int64
+	Modified time.Time
+	// Digest is Proton's own SHA1 of the plaintext, when the file carries
+	// the extended attribute. It gives us an integrity check that does not
+	// depend on our own download path being correct.
+	Digest string
+}
+
+// Drive is an authenticated Proton Drive session.
+type Drive struct {
+	pd  *bridge.ProtonDrive
+	log Logger
+}
+
+// Logger receives progress and diagnostic output.
+type Logger interface {
+	Errorf(format string, v ...interface{})
+	Warnf(format string, v ...interface{})
+	Debugf(format string, v ...interface{})
+}
+
+type nopLogger struct{}
+
+func (nopLogger) Errorf(string, ...interface{}) {}
+func (nopLogger) Warnf(string, ...interface{})  {}
+func (nopLogger) Debugf(string, ...interface{}) {}
+
+// Open establishes a Drive session from an existing pdrive session.
+//
+// The bridge cannot perform a 2FA login itself, but it accepts an already
+// authenticated session (UID, tokens and the base64 key passphrase). pdrive
+// does its own SRP + TOTP login in internal/api and hands the result over
+// here, which is what lets 2FA accounts work at all.
+func Open(ctx context.Context, session *api.Session, log Logger) (*Drive, error) {
+	if session == nil || session.AccessToken == "" {
+		return nil, fmt.Errorf("not logged in")
+	}
+	if session.SaltedKeyPass == "" {
+		return nil, fmt.Errorf("session has no key passphrase — log in again with `pdrive`")
+	}
+	if log == nil {
+		log = nopLogger{}
+	}
+
+	cfg := bridge.NewDefaultConfig()
+
+	// Identify pdrive honestly. Required by the Proton Drive integration
+	// rules; spoofing a first-party client is forbidden.
+	cfg.AppVersion = api.AppVersion
+	cfg.UserAgent = api.UserAgent
+	cfg.Logger = log
+
+	// Never write a plaintext credential cache file. Our session store is
+	// encrypted; the bridge's cache is not.
+	cfg.CredentialCacheFile = ""
+
+	cfg.UseReusableLogin = true
+	cfg.ReusableCredential = &common.ReusableCredentialData{
+		UID:           session.UID,
+		AccessToken:   session.AccessToken,
+		RefreshToken:  session.RefreshToken,
+		SaltedKeyPass: session.SaltedKeyPass,
+	}
+	cfg.FirstLoginCredential = &common.FirstLoginCredentialData{}
+
+	// Be conservative with concurrency. The integration rules warn that
+	// excessive parallelism gets the application and the account
+	// rate-limited, and a backup is not worth that.
+	cfg.ConcurrentBlockUploadCount = 4
+
+	pd, _, err := bridge.NewProtonDrive(ctx, cfg, func(auth proton.Auth) {}, func() {})
+	if err != nil {
+		return nil, fmt.Errorf("open drive: %w", err)
+	}
+
+	return &Drive{pd: pd, log: log}, nil
+}
+
+// Close releases the Drive session. It does not revoke the session
+// server-side — pdrive keeps it for the next run.
+func (d *Drive) Close() {}
+
+// About returns the account, including quota.
+func (d *Drive) About(ctx context.Context) (*proton.User, error) {
+	return d.pd.About(ctx)
+}
+
+// RootLinkID returns the link ID of the Drive root folder.
+func (d *Drive) RootLinkID() string { return d.pd.RootLink.LinkID }
+
+// WalkFunc is called once per node during Walk. Returning an error aborts
+// the walk.
+type WalkFunc func(n Node) error
+
+// Walk traverses the Drive tree depth-first from the root, calling fn for
+// every active folder and file.
+//
+// This is a full tree traversal and is deliberately reserved for one-shot
+// operations such as the initial backup. Steady-state synchronisation must
+// use the event cursor instead: the integration rules explicitly forbid
+// frequent recursive traversals.
+func (d *Drive) Walk(ctx context.Context, fn WalkFunc) error {
+	return d.walk(ctx, d.pd.RootLink.LinkID, "", fn)
+}
+
+func (d *Drive) walk(ctx context.Context, linkID, prefix string, fn WalkFunc) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	children, err := d.pd.ListDirectory(ctx, linkID)
+	if err != nil {
+		return fmt.Errorf("list %q: %w", pathOrRoot(prefix), err)
+	}
+
+	for _, child := range children {
+		path := child.Name
+		if prefix != "" {
+			path = prefix + "/" + child.Name
+		}
+
+		node := Node{
+			LinkID:   child.Link.LinkID,
+			ParentID: linkID,
+			Name:     child.Name,
+			Path:     path,
+			IsDir:    child.IsFolder,
+		}
+
+		if !child.IsFolder {
+			// Attributes live in an encrypted extended attribute that is not
+			// always present. A file without them is still downloadable, so
+			// treat a miss as unknown metadata rather than a failure.
+			attrs, attrErr := d.pd.GetActiveRevisionAttrs(ctx, child.Link)
+			if attrErr != nil {
+				d.log.Warnf("attributes unavailable for %q: %v", path, attrErr)
+			} else if attrs != nil {
+				node.Size = attrs.Size
+				node.Modified = attrs.ModificationTime
+				node.Digest = attrs.Digests
+			}
+		}
+
+		if err := fn(node); err != nil {
+			return err
+		}
+
+		if child.IsFolder {
+			if err := d.walk(ctx, child.Link.LinkID, path, fn); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Download opens a file's active revision for reading. The caller closes the
+// returned reader. The reported size is the plaintext size.
+func (d *Drive) Download(ctx context.Context, linkID string) (io.ReadCloser, int64, error) {
+	rc, size, _, err := d.pd.DownloadFileByID(ctx, linkID, 0)
+	if err != nil {
+		return nil, 0, fmt.Errorf("download %s: %w", linkID, err)
+	}
+	return rc, size, nil
+}
+
+func pathOrRoot(p string) string {
+	if p == "" {
+		return "/"
+	}
+	return p
+}

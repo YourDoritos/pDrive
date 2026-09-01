@@ -52,7 +52,20 @@ adaptive polling and still works, just with a stale window.
 
 **Phase 0 — authentication.** SRP login with TOTP and two-password accounts,
 encrypted session persistence, and verification that the PGP key hierarchy
-actually unlocks. No files are synced yet.
+actually unlocks.
+
+**Phase 0.5 — verified backup.** `pdrive backup` mirrors the whole account to
+disk and re-hashes every file. Read-only against Proton by construction. It
+writes both a `manifest.json` and a `sha1sum(1)`-compatible `MANIFEST.sha1`, so
+the copy can be re-checked with standard tools without trusting pdrive:
+
+```bash
+pdrive backup                     # ~/pdrive-backup-<date>, then verifies
+pdrive verify <dir>               # re-check offline, any time later
+cd <dir> && sha1sum -c MANIFEST.sha1
+```
+
+No sync yet — nothing writes to your account.
 
 See [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md) for the full design and the
 phase plan.

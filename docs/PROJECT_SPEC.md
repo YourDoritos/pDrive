@@ -235,9 +235,16 @@ Phase 1's ugly-but-safe stubs ship first and remain the fallback forever.
 | `github.com/godbus/dbus/v5` | Suspend/resume, network signals. Already in pVPN | BSD-2 |
 | `github.com/BurntSushi/toml` | Config, same as pVPN | MIT |
 
-**Vendor `Proton-API-Bridge`.** Its own README lists the gaps we must fill: no 2FA login,
-single share only, no parallel transfer, no moves/renames, no event integration. Upstream
-(`henrybear327/*`) was archived Jan 2025; rclone forked it and maintains it (last push Aug 2026).
+**Vendor `Proton-API-Bridge`** when we start extending it. Its own README lists the gaps we
+must fill: single share only, no parallel transfer, no moves/renames, no event integration.
+Upstream (`henrybear327/*`) was archived Jan 2025; rclone forked it and maintains it (last push
+Aug 2026).
+
+**The "no 2FA login" gap does not apply to us.** The bridge accepts a
+`common.ReusableCredentialData{UID, AccessToken, RefreshToken, SaltedKeyPass}` with
+`UseReusableLogin: true` — exactly what `internal/api` already produces. pdrive performs its
+own SRP + TOTP login and hands the finished session over, so 2FA accounts work through a
+library that cannot do 2FA itself. Verified in Phase 0.5 against a live 2FA account.
 
 **Reference, do not link:** `ProtonDriveApps/sdk` (MIT, TypeScript + C#) is the *official*
 implementation and our specification. `cli/src/` has `credentials/`, `events/`, `cache/`
@@ -377,11 +384,26 @@ Proton forbids duplicate names in a folder; invalid UTF-8 replaced, edge spaces 
 Normalize on upload, keep the mapping in `nodes.path`, detect case-collisions before they
 become a sync loop.
 
-### Modification times
-rclone documents Proton Drive as not supporting mtime. **Verify against the current SDK in
-Phase 1** (the CLI changelog mentions an "optional module for generating and parsing additional
-node metadata"). Either way the design is safe: the DB is authoritative, comparison is
-`size + SHA1`, mtime is only a fast path to skip hashing.
+### Modification times — RESOLVED, they are available
+
+rclone's backend documentation says Proton Drive does not support mtime. **That is out of
+date.** Verified against a live account in Phase 0.5: Proton stores the modification time in
+the file's encrypted extended attribute, and the bridge surfaces it as
+`FileSystemAttrs.ModificationTime` with sub-second precision:
+
+```
+"modified": "2026-07-14T09:20:01.455Z"
+"modified": "2026-02-23T14:14:59.6666406Z"
+```
+
+The same xattr also carries **Proton's own SHA1 of the plaintext**
+(`FileSystemAttrs.Digests`), which gives us an end-to-end integrity check that does not depend
+on our download path being correct. Both files in the Phase 0.5 backup matched it exactly.
+
+Design consequence: mtime is usable in the reconciler, not merely a hint. The state DB stays
+authoritative and `size + SHA1` remains the tiebreak, because the attribute block is documented
+as sometimes absent ("Might return nil when xattr is missing"). A file without it still syncs;
+it just costs a hash.
 
 ---
 
@@ -468,17 +490,27 @@ exclude = []
 
 ## Development Phases
 
-### Phase 0 - Skeleton
+### Phase 0 - Skeleton — DONE
 Repo, module, Makefile, golangci mirroring pVPN. Port `internal/api`, `internal/config`,
 `internal/ipc`, TUI shell. Login screen with the third-party disclosure. `x-pm-appversion`
 wired in.
 **Done when:** `pdrive` logs in with SRP + 2FA and prints the account's storage quota.
 **-> You log in here, then we have a live account for everything after.**
 
-### Phase 0.5 - Back up the account (HARD GATE)
-Before a single line of write-path code runs: full recursive download of the account to
-`~/pdrive-backup-<date>/`, with a SHA1 manifest, verified. Re-verified before Phase 2.
-**No write-path testing happens until this passes.**
+### Phase 0.5 - Back up the account (HARD GATE) — DONE
+Full recursive download of the account to `~/pdrive-backup-<date>/`, with a SHA1 manifest,
+verified. Re-verify before Phase 2.
+
+Shipped as `pdrive backup` / `pdrive verify`. Read-only against Proton by construction: it
+lists and downloads, and calls nothing that mutates. Writes `manifest.json` plus a
+sha1sum(1)-compatible `MANIFEST.sha1`, so the copy can be re-checked with standard tools
+without trusting pdrive. Every server-supplied name is validated before it becomes a path
+(`internal/backup/safepath.go`) — a name like `../../.bashrc` can never escape the destination.
+Atomic writes throughout; `--resume` skips files already present and intact; refuses to write
+into a non-empty directory without it.
+
+First run: 2 files / 528.4 KiB, verified clean by our own re-hash, by `sha1sum -c`, and against
+Proton's own stored digests.
 
 ### Phase 1 - Read-only mirror (cloud -> local)
 Vendor the bridge; bootstrap volume/share/root. State DB + migrations. Initial sync down,

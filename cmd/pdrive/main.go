@@ -25,6 +25,18 @@ func main() {
 		case "paths":
 			fmt.Println(config.DebugPaths())
 			return
+		case "backup":
+			if err := cmdBackup(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "pdrive backup: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "verify":
+			if err := cmdVerify(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "pdrive verify: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "help", "--help", "-h":
 			usage()
 			return
@@ -45,10 +57,17 @@ func usage() {
 	fmt.Print(`pdrive — Proton Drive sync for Linux (unofficial)
 
 usage:
-  pdrive           launch the terminal UI
-  pdrive version   print the version
-  pdrive paths     print resolved config/state paths
-  pdrive help      show this message
+  pdrive                  launch the terminal UI
+  pdrive backup [flags]   mirror the account to disk and verify it
+  pdrive verify <dir>     re-check an existing backup (offline)
+  pdrive version          print the version
+  pdrive paths            print resolved config/state paths
+  pdrive help             show this message
+
+backup flags:
+  --out DIR    destination (default ~/pdrive-backup-<date>)
+  --resume     continue an interrupted backup
+  --quiet      only print the summary
 
 This is a third-party application not officially supported by Proton.
 `)
