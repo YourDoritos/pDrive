@@ -31,6 +31,24 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "sync":
+			if err := cmdSync(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "pdrive sync: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "get":
+			if err := cmdGet(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "pdrive get: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "status":
+			if err := cmdStatus(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "pdrive status: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "verify":
 			if err := cmdVerify(os.Args[2:]); err != nil {
 				fmt.Fprintf(os.Stderr, "pdrive verify: %v\n", err)
@@ -58,11 +76,19 @@ func usage() {
 
 usage:
   pdrive                  launch the terminal UI
-  pdrive backup [flags]   mirror the account to disk and verify it
+  pdrive sync [flags]     bring the sync folder up to date (download only)
+  pdrive get <path>       download a file left as a stub by the size cap
+  pdrive status           show what the mirror holds (offline)
+  pdrive backup [flags]   make a separate verified archive of the account
   pdrive verify <dir>     re-check an existing backup (offline)
   pdrive version          print the version
   pdrive paths            print resolved config/state paths
   pdrive help             show this message
+
+sync flags:
+  --full                 force a full tree walk instead of replaying events
+  --confirm-deletions    proceed past the deletion-cliff guard for one pass
+  --quiet                only print the summary
 
 backup flags:
   --out DIR    destination (default ~/pdrive-backup-<date>)

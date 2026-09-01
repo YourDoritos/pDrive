@@ -65,7 +65,19 @@ pdrive verify <dir>               # re-check offline, any time later
 cd <dir> && sha1sum -c MANIFEST.sha1
 ```
 
-No sync yet — nothing writes to your account.
+**Phase 1 — read-only mirror.** `pdrive sync` mirrors the account into
+`~/pdrive`: a full walk on first run, then event-cursor replay. Modification
+times are preserved, files over `max_auto_download_size` land as visible
+`.pdrive-stub` placeholders, and remote deletions go to a local trash rather
+than being unlinked.
+
+```bash
+pdrive sync              # bring the folder up to date
+pdrive get <path>        # fetch a file left as a stub
+pdrive status            # what the mirror holds (offline)
+```
+
+Still download-only — nothing writes to your account.
 
 See [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md) for the full design and the
 phase plan.

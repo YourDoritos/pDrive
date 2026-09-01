@@ -156,17 +156,7 @@ func (d *Drive) walk(ctx context.Context, linkID, prefix string, fn WalkFunc) er
 		}
 
 		if !child.IsFolder {
-			// Attributes live in an encrypted extended attribute that is not
-			// always present. A file without them is still downloadable, so
-			// treat a miss as unknown metadata rather than a failure.
-			attrs, attrErr := d.pd.GetActiveRevisionAttrs(ctx, child.Link)
-			if attrErr != nil {
-				d.log.Warnf("attributes unavailable for %q: %v", path, attrErr)
-			} else if attrs != nil {
-				node.Size = attrs.Size
-				node.Modified = attrs.ModificationTime
-				node.Digest = attrs.Digests
-			}
+			d.fillAttrs(ctx, child.Link, &node)
 		}
 
 		if err := fn(node); err != nil {
@@ -197,4 +187,23 @@ func pathOrRoot(p string) string {
 		return "/"
 	}
 	return p
+}
+
+// fillAttrs populates size, modification time and Proton's own digest.
+//
+// These live in an encrypted extended attribute that is documented as
+// sometimes absent. A file without it is still perfectly downloadable, so a
+// miss is unknown metadata rather than a failure.
+func (d *Drive) fillAttrs(ctx context.Context, link *proton.Link, node *Node) {
+	attrs, err := d.pd.GetActiveRevisionAttrs(ctx, link)
+	if err != nil {
+		d.log.Warnf("attributes unavailable for %q: %v", node.Path, err)
+		return
+	}
+	if attrs == nil {
+		return
+	}
+	node.Size = attrs.Size
+	node.Modified = attrs.ModificationTime
+	node.Digest = attrs.Digests
 }

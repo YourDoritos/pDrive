@@ -361,7 +361,12 @@ of delete + re-upload.
 ### Safety guards (where OneDrive actually fails)
 
 1. **Deletion cliff** - a pass that would delete more than `deletion_guard_percent` (default
-   25%) of tracked nodes on either side: **stop**, notify, require `pdrivectl confirm-deletions`.
+   25%) of tracked nodes on either side: **stop**, notify, require `--confirm-deletions`.
+   **Also requires an absolute floor of 10 deletions.** A percentage alone is useless on a
+   small account — removing one file of two is 50%, so the guard would fire during completely
+   ordinary use, users would learn to bypass it reflexively, and it would protect nothing when
+   it mattered. Small accounts are not left exposed: every removal still goes to the local
+   trash under guard 4.
 2. **Missing root** - root absent, not a directory, or empty while the DB has entries:
    **stop**. An unmounted or renamed folder is not "the user deleted everything."
 3. **Local deletes -> Proton trash.** Never permanent-delete remotely.
@@ -512,12 +517,23 @@ into a non-empty directory without it.
 First run: 2 files / 528.4 KiB, verified clean by our own re-hash, by `sha1sum -c`, and against
 Proton's own stored digests.
 
-### Phase 1 - Read-only mirror (cloud -> local)
-Vendor the bridge; bootstrap volume/share/root. State DB + migrations. Initial sync down,
-atomic writes, resumable block download. Event cursor loop. `max_auto_download_size` +
-`.pdrive-stub` + `pdrivectl get`. Verify mtime support.
-**Done when:** `~/pdrive` mirrors the account, a file added on the web appears locally, and a
-file over the cap lands as a stub instead of eating the disk.
+### Phase 1 - Read-only mirror (cloud -> local) — DONE
+Bridge vendored (`third_party/`, see VENDOR.md). State DB with migrations. Full mirror on
+first run, event replay thereafter. `max_auto_download_size` + `.pdrive-stub` + `pdrive get`.
+
+Shipped as `pdrive sync` / `pdrive get` / `pdrive status`. Download-only: it calls nothing
+that mutates the account.
+
+The reconciler talks to a `mirror.Source` interface rather than to Proton, so the whole engine
+runs against an in-memory fake with no network — which is what makes the adversarial tests
+below possible, and what Phase 2 will lean on heavily.
+
+Verified against the live account: full mirror, event replay with no walk, mtime preserved to
+sub-second precision, size cap producing a stub, `pdrive get` materialising it byte-identically
+to the Phase 0.5 backup.
+
+**Outstanding:** "a file added on the web appears locally" still needs a human to add one —
+pdrive cannot write to the account yet, by design.
 
 ### Phase 2 - Bidirectional
 Local scan + hashing, inotify change detection, debounced upload. Block upload + revision

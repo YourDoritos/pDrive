@@ -42,6 +42,9 @@ linters:
           disabled: true
 
   exclusions:
+    paths:
+      # Vendored upstream, checked as-is. See third_party/VENDOR.md.
+      - third_party/
     rules:
       - path: _test\.go
         linters: [errcheck]
