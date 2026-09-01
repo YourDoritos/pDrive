@@ -44,7 +44,7 @@ func cmdBackup(args []string) error {
 		return err
 	}
 
-	session, err := loadSession()
+	session, store, err := loadSession()
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func cmdBackup(args []string) error {
 	defer stop()
 
 	fmt.Printf("Opening Proton Drive as %s…\n", session.LoginEmail)
-	d, err := drive.Open(ctx, session, nil)
+	d, err := openDrive(ctx, session, store, nil)
 	if err != nil {
 		return err
 	}
@@ -164,22 +164,47 @@ func reportVerify(res *backup.VerifyResult, warnings int) {
 
 // loadSession reads the stored session and refuses to continue without the
 // key passphrase, which is what actually decrypts the account.
-func loadSession() (*api.Session, error) {
+func loadSession() (*api.Session, *api.SessionStore, error) {
 	store, err := api.NewSessionStore(config.SessionFile())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	session, err := store.Load()
 	if err != nil {
-		return nil, fmt.Errorf("read session: %w", err)
+		return nil, nil, fmt.Errorf("read session: %w", err)
 	}
 	if session == nil || session.AccessToken == "" {
-		return nil, fmt.Errorf("not logged in — run `pdrive` first")
+		return nil, nil, fmt.Errorf("not logged in — run `pdrive` first")
 	}
 	if session.SaltedKeyPass == "" {
-		return nil, fmt.Errorf("session predates key storage — run `pdrive`, log out and back in")
+		return nil, nil, fmt.Errorf("session predates key storage — run `pdrive`, log out and back in")
 	}
-	return session, nil
+	return session, store, nil
+}
+
+// openDrive opens an authenticated Drive session with token rotation wired to
+// the session store.
+//
+// Proton issues a new refresh token on every refresh and invalidates the old
+// one at once. If the new pair is not written back, the running process keeps
+// working from memory and the *next* invocation fails with 10013. Every path
+// that opens a Drive must go through here.
+func openDrive(ctx context.Context, session *api.Session, store *api.SessionStore, log drive.Logger) (*drive.Drive, error) {
+	return drive.Open(ctx, drive.Options{
+		Session: session,
+		Log:     log,
+		OnAuth: func(uid, accessToken, refreshToken string) {
+			if err := store.UpdateTokens(uid, accessToken, refreshToken); err != nil {
+				fmt.Fprintf(os.Stderr, "pdrive: WARNING: could not persist refreshed tokens: %v\n", err)
+				fmt.Fprintf(os.Stderr, "        the next run will need a fresh login\n")
+			}
+		},
+		OnDeauth: func() {
+			// The session is revoked server-side. Remove it so the next run
+			// prompts for a login rather than replaying a dead token.
+			_ = store.Delete()
+		},
+	})
 }
 
 // checkDest refuses to write into a directory that already holds something,

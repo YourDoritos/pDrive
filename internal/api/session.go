@@ -148,3 +148,25 @@ func DecodeKeyPass(encoded string) ([]byte, error) {
 	}
 	return base64.StdEncoding.DecodeString(encoded)
 }
+
+// UpdateTokens writes a rotated token pair into the stored session,
+// preserving the login email and key passphrase.
+//
+// Proton issues a new refresh token on every refresh and invalidates the
+// previous one immediately. Whatever holds a Proton client must call this on
+// every rotation: skipping it leaves a spent token on disk, the running
+// process keeps working from memory, and the *next* start fails with
+// "Invalid refresh token" (Code=10013). The failure is delayed and looks
+// nothing like its cause, which is what makes it worth a dedicated method
+// and a test.
+func (s *SessionStore) UpdateTokens(uid, accessToken, refreshToken string) error {
+	session, err := s.Load()
+	if err != nil || session == nil {
+		// A missing or unreadable session must not discard a live token pair.
+		session = &Session{}
+	}
+	session.UID = uid
+	session.AccessToken = accessToken
+	session.RefreshToken = refreshToken
+	return s.Save(session)
+}

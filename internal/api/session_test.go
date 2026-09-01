@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -153,4 +154,78 @@ func containsBytes(haystack []byte, needle string) bool {
 		}
 	}
 	return false
+}
+
+// Regression test for the delayed-logout bug.
+//
+// Proton invalidates a refresh token the moment it is used. Discarding the
+// replacement leaves a spent token on disk: the running process keeps working
+// from memory, and the next start dies with "Invalid refresh token"
+// (Code=10013) far from the actual cause.
+func TestUpdateTokensPersistsRotation(t *testing.T) {
+	store, _ := newTestStore(t)
+
+	raw := base64.StdEncoding.EncodeToString([]byte{0xff, 0x00, 0x80})
+	original := &Session{
+		UID: "uid-1", AccessToken: "access-1", RefreshToken: "refresh-1",
+		LoginEmail: "someone@proton.me", SaltedKeyPass: raw,
+	}
+	if err := store.Save(original); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.UpdateTokens("uid-1", "access-2", "refresh-2"); err != nil {
+		t.Fatalf("UpdateTokens: %v", err)
+	}
+
+	got, err := store.Load()
+	if err != nil || got == nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.AccessToken != "access-2" || got.RefreshToken != "refresh-2" {
+		t.Errorf("tokens = %s/%s, want access-2/refresh-2", got.AccessToken, got.RefreshToken)
+	}
+	// The rotation must not cost us the things a rotation does not carry.
+	if got.LoginEmail != "someone@proton.me" {
+		t.Errorf("login email lost through rotation: %q", got.LoginEmail)
+	}
+	if got.SaltedKeyPass != raw {
+		t.Errorf("key passphrase lost through rotation: %q", got.SaltedKeyPass)
+	}
+}
+
+// Rotations arrive repeatedly over a long-running session; each must land.
+func TestUpdateTokensRepeatedly(t *testing.T) {
+	store, _ := newTestStore(t)
+	if err := store.Save(&Session{UID: "u", AccessToken: "a0", RefreshToken: "r0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 1; i <= 5; i++ {
+		if err := store.UpdateTokens("u", fmt.Sprintf("a%d", i), fmt.Sprintf("r%d", i)); err != nil {
+			t.Fatalf("rotation %d: %v", i, err)
+		}
+	}
+
+	got, _ := store.Load()
+	if got.RefreshToken != "r5" {
+		t.Errorf("refresh token = %q, want r5", got.RefreshToken)
+	}
+}
+
+// A rotation arriving with no session on disk must still be saved: losing it
+// would strand the running process with a token nothing else knows about.
+func TestUpdateTokensWithNoExistingSession(t *testing.T) {
+	store, _ := newTestStore(t)
+
+	if err := store.UpdateTokens("uid-x", "access-x", "refresh-x"); err != nil {
+		t.Fatalf("UpdateTokens with no prior session: %v", err)
+	}
+	got, err := store.Load()
+	if err != nil || got == nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.RefreshToken != "refresh-x" {
+		t.Errorf("refresh token = %q", got.RefreshToken)
+	}
 }

@@ -8,8 +8,10 @@ package drive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	bridge "github.com/rclone/Proton-API-Bridge"
@@ -53,19 +55,43 @@ func (nopLogger) Errorf(string, ...interface{}) {}
 func (nopLogger) Warnf(string, ...interface{})  {}
 func (nopLogger) Debugf(string, ...interface{}) {}
 
+// Options configures Open.
+type Options struct {
+	// Session is the authenticated pdrive session.
+	Session *api.Session
+	// Log receives diagnostics. Optional.
+	Log Logger
+
+	// OnAuth is called whenever Proton issues a new token pair, and MUST
+	// persist it.
+	//
+	// Proton rotates the refresh token on every refresh and invalidates the
+	// previous one immediately. A client that does not save the new pair is
+	// left holding a spent token: the current process keeps working from
+	// memory, and the *next* start fails with "Invalid refresh token"
+	// (Code=10013). Passing a no-op here is a silent, delayed logout.
+	OnAuth func(uid, accessToken, refreshToken string)
+
+	// OnDeauth is called when Proton revokes the session outright. The
+	// stored session is dead and the user must log in again.
+	OnDeauth func()
+}
+
 // Open establishes a Drive session from an existing pdrive session.
 //
 // The bridge cannot perform a 2FA login itself, but it accepts an already
 // authenticated session (UID, tokens and the base64 key passphrase). pdrive
 // does its own SRP + TOTP login in internal/api and hands the result over
 // here, which is what lets 2FA accounts work at all.
-func Open(ctx context.Context, session *api.Session, log Logger) (*Drive, error) {
+func Open(ctx context.Context, opts Options) (*Drive, error) {
+	session := opts.Session
 	if session == nil || session.AccessToken == "" {
 		return nil, fmt.Errorf("not logged in")
 	}
 	if session.SaltedKeyPass == "" {
 		return nil, fmt.Errorf("session has no key passphrase — log in again with `pdrive`")
 	}
+	log := opts.Log
 	if log == nil {
 		log = nopLogger{}
 	}
@@ -96,12 +122,43 @@ func Open(ctx context.Context, session *api.Session, log Logger) (*Drive, error)
 	// rate-limited, and a backup is not worth that.
 	cfg.ConcurrentBlockUploadCount = 4
 
-	pd, _, err := bridge.NewProtonDrive(ctx, cfg, func(auth proton.Auth) {}, func() {})
+	onAuth := func(auth proton.Auth) {
+		if opts.OnAuth != nil {
+			opts.OnAuth(auth.UID, auth.AccessToken, auth.RefreshToken)
+		}
+	}
+	onDeauth := func() {
+		if opts.OnDeauth != nil {
+			opts.OnDeauth()
+		}
+	}
+
+	pd, _, err := bridge.NewProtonDrive(ctx, cfg, onAuth, onDeauth)
 	if err != nil {
+		if isDeadSession(err) {
+			return nil, ErrSessionExpired
+		}
 		return nil, fmt.Errorf("open drive: %w", err)
 	}
 
 	return &Drive{pd: pd, log: log}, nil
+}
+
+// ErrSessionExpired reports that the stored session can no longer be used and
+// the user must log in again.
+var ErrSessionExpired = errors.New(
+	"your Proton session has expired — run `pdrive` and log in again")
+
+// isDeadSession recognises the API's permanent-auth-failure signals. Proton
+// returns code 10013 when a refresh token has already been spent or revoked.
+func isDeadSession(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "10013") ||
+		strings.Contains(msg, "Invalid refresh token") ||
+		strings.Contains(msg, "de-auth")
 }
 
 // Close releases the Drive session. It does not revoke the session

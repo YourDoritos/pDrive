@@ -486,6 +486,7 @@ exclude = []
 | Live-but-stuck `pdrived` wedging listings | Medium | `max_block_ms` hard deadline in the gate, enforced by the gate, not by `pdrived`. Verified: gate *death* already fails open at kernel level. |
 | Sparse placeholders read as zeros with no populator | Medium | Phase 5 only; xattr tag, gate-alive precondition, convert-to-stub on shutdown, `doctor` repair. Phase 1 stubs have a different filename and cannot be misread. |
 | No app passwords / scoped tokens - daemon holds full account credentials | Medium | Same tradeoff pVPN already makes. Argon2id + secretbox at rest; optional TOTP prompt instead of a stored secret. |
+| **Refresh-token rotation.** Proton issues a new refresh token on every refresh and invalidates the old one instantly. Dropping the replacement is a *delayed* logout: the running process keeps working from memory and the next start dies with 10013, far from the cause. | Medium | Every Proton client must route rotations through `SessionStore.UpdateTokens`, covered by regression tests. Hit us once in Phase 1 — `drive.Open` was passing a no-op auth handler to the bridge. Also the reason two processes must never share one session file. |
 | Rate limiting shared with first-party clients | Medium | Cursor deltas only, `fresh_window` throttle, exponential backoff, honest `x-pm-appversion`. |
 | Bridge gaps (2FA, single share, no moves, no parallelism) | Medium | Vendored and extended. Real work, budget for it. |
 | mtime possibly unsupported | Low | Already treated as a hint. |

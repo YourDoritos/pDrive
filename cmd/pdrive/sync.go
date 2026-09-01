@@ -165,7 +165,7 @@ func orNever(s string) string {
 
 // openMirror wires up session, Drive, state DB and Mirror.
 func openMirror(ctx context.Context, opts mirror.Options) (*mirror.Mirror, *state.DB, *drive.Drive, error) {
-	session, err := loadSession()
+	session, store, err := loadSession()
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -181,7 +181,7 @@ func openMirror(ctx context.Context, opts mirror.Options) (*mirror.Mirror, *stat
 		return nil, nil, nil, err
 	}
 
-	d, err := drive.Open(ctx, session, nil)
+	d, err := openDrive(ctx, session, store, nil)
 	if err != nil {
 		db.Close()
 		return nil, nil, nil, err
