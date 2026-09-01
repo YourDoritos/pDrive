@@ -1,4 +1,4 @@
-# pdrive - Proton Drive Sync Client for Linux
+# pDrive - Proton Drive Sync Client for Linux
 
 > "A project is only as good as the plan" - Sun Tzu (probably)
 
@@ -22,8 +22,8 @@ copies, no move detection, no TUI.
 
 **The user should never press refresh, and should never think about the lag.**
 
-- **Install:** `yay -S pdrive`
-- **Run:** `pdrive` -> login once -> done
+- **Install:** `yay -S pDrive`
+- **Run:** `pDrive` -> login once -> done
 - **Use:** put a file in `~/pdrive`, it's in the cloud. `ls` on the other machine shows it
   *in that same `ls`* - not on the next one.
 
@@ -238,7 +238,7 @@ Phase 1's ugly-but-safe stubs ship first and remain the fallback forever.
 
 ```
 +------------------+     +---------------------+
-|   TUI (pdrive)   |     |   CLI (pdrivectl)   |
+|   TUI (pDrive)   |     |   CLI (pdrivectl)   |
 +--------+---------+     +----------+----------+
          |  unix socket (JSON IPC, reused from pVPN)  |
          +--------------------+----------------------+
@@ -264,7 +264,7 @@ Phase 1's ugly-but-safe stubs ship first and remain the fallback forever.
 
 | Component | Responsibility |
 |---|---|
-| **`pdrive`** | TUI: login, status, activity, conflicts, selective sync, settings |
+| **`pDrive`** | TUI: login, status, activity, conflicts, selective sync, settings |
 | **`pdrivectl`** | `status`, `sync`, `get`, `pause`, `resume`, `conflicts`, `doctor`. Waybar/tmux friendly |
 | **`pdrived`** | Unprivileged. Sync loop, credentials, state. `systemd --user` + linger |
 | **`pdrive-gate`** | Root. fanotify only. `systemd` system unit, `Restart=always` |
@@ -296,7 +296,7 @@ Aug 2026).
 
 **The "no 2FA login" gap does not apply to us.** The bridge accepts a
 `common.ReusableCredentialData{UID, AccessToken, RefreshToken, SaltedKeyPass}` with
-`UseReusableLogin: true` — exactly what `internal/api` already produces. pdrive performs its
+`UseReusableLogin: true` — exactly what `internal/api` already produces. pDrive performs its
 own SRP + TOTP login and hands the finished session over, so 2FA accounts work through a
 library that cannot do 2FA itself. Verified in Phase 0.5 against a live 2FA account.
 
@@ -554,7 +554,7 @@ exclude = []
 Repo, module, Makefile, golangci mirroring pVPN. Port `internal/api`, `internal/config`,
 `internal/ipc`, TUI shell. Login screen with the third-party disclosure. `x-pm-appversion`
 wired in.
-**Done when:** `pdrive` logs in with SRP + 2FA and prints the account's storage quota.
+**Done when:** `pDrive` logs in with SRP + 2FA and prints the account's storage quota.
 **-> You log in here, then we have a live account for everything after.**
 
 ### Phase 0.5 - Back up the account (HARD GATE) — DONE
@@ -564,7 +564,7 @@ verified. Re-verify before Phase 2.
 Shipped as `pdrive backup` / `pdrive verify`. Read-only against Proton by construction: it
 lists and downloads, and calls nothing that mutates. Writes `manifest.json` plus a
 sha1sum(1)-compatible `MANIFEST.sha1`, so the copy can be re-checked with standard tools
-without trusting pdrive. Every server-supplied name is validated before it becomes a path
+without trusting pDrive. Every server-supplied name is validated before it becomes a path
 (`internal/backup/safepath.go`) — a name like `../../.bashrc` can never escape the destination.
 Atomic writes throughout; `--resume` skips files already present and intact; refuses to write
 into a non-empty directory without it.
@@ -594,7 +594,7 @@ remote modification time intact.
 ### BLOCKER: Proton's block-upload verification (discovered Phase 2)
 
 **Uploads from every Go client — rclone included — have been broken since
-September 2025.** This is not a pdrive bug; the entire ecosystem is affected.
+September 2025.** This is not a pDrive bug; the entire ecosystem is affected.
 
 Proton's storage backend now requires a per-block **verification token** in
 `POST /drive/blocks`. Requests without one are rejected:
@@ -635,7 +635,7 @@ block-upload request types), add the verification endpoint, add the `Verifier`
 field, and port the ~40 lines above into the bridge's
 `uploadAndCollectBlockData`.
 
-Worth noting: this would make pdrive the only working Go implementation of
+Worth noting: this would make pDrive the only working Go implementation of
 Proton Drive upload, and the patch is upstreamable to rclone.
 
 ### Phase 2 - Bidirectional — ENGINE DONE, UPLOAD BLOCKED
@@ -655,7 +655,7 @@ instant.
 **Done when:** two machines converge under concurrent edits and nothing is ever lost.
 
 ### Phase 3 - Daemon + gate
-Split `pdrived` / `pdrive` / `pdrivectl`; `systemd --user` + linger. Build `pdrive-gate`:
+Split `pdrived` / `pDrive` / `pdrivectl`; `systemd --user` + linger. Build `pdrive-gate`:
 fanotify marks over the tree, gate protocol, deadline, self-exclusion, fail-open, system unit.
 Fallback tier (inotify + adaptive cadence) for gate-less installs. `pdrivectl status` in
 waybar/tmux format for your Hyprland bar.
@@ -666,7 +666,7 @@ waybar/tmux format for your Hyprland bar.
 Bandwidth limits, parallel transfers, selective sync, `.pdriveignore`. Conflict browser +
 activity log in the TUI, desktop notifications. Log rotation, `pdrivectl doctor`. PKGBUILD,
 AUR, README with screenshots.
-**Done when:** `yay -S pdrive` works on a clean machine.
+**Done when:** `yay -S pDrive` works on a clean machine.
 
 ### Phase 5 - Transparent placeholders
 Sparse placeholders at real names + xattr + per-inode `FAN_OPEN_PERM`; then `FAN_PRE_ACCESS`
@@ -694,7 +694,7 @@ Also: thumbnails, photos/albums, share links, multiple shares.
 make build           # static binaries into ./bin
 make install         # binaries + systemd units + linger
 sudo systemctl enable --now pdrive-gate     # optional, for blocking freshness
-pdrive               # TUI
+pDrive               # TUI
 pdrivectl status     # scriptable
 ```
 

@@ -393,6 +393,21 @@ func (m *Mirror) applyNode(ctx context.Context, n drive.Node) error {
 		return m.writeStubFor(n)
 	}
 
+	// Has the remote actually changed since we last agreed?
+	//
+	// This check is what makes the pull stage part of a three-way
+	// reconciliation rather than a two-way one. Without it, a file edited
+	// only locally looks "different from the remote" and gets pulled over,
+	// which then presents as a conflict against the user's own edit. The
+	// remote is the side that must have moved for a download to be correct;
+	// a purely local difference belongs to the push stage.
+	if base != nil && base.ContentHash != "" && n.Digest != "" &&
+		strings.EqualFold(base.ContentHash, n.Digest) {
+		m.result.Skipped++
+		m.emit(Event{Kind: EventSkip, Path: n.Path})
+		return nil
+	}
+
 	// Already correct on disk? Trust size plus mtime, and fall back to a hash
 	// when the metadata is ambiguous. Proton's own digest, when present, is
 	// the strongest signal available.
@@ -634,7 +649,7 @@ func validPath(p string) bool {
 			return false
 		}
 		if strings.HasSuffix(part, StubSuffix) || strings.HasSuffix(part, TempSuffix) {
-			// Would collide with pdrive's own bookkeeping files.
+			// Would collide with pDrive's own bookkeeping files.
 			return false
 		}
 	}

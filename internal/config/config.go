@@ -10,7 +10,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config is the pdrive configuration. Field layout mirrors
+// Config is the pDrive configuration. Field layout mirrors
 // docs/PROJECT_SPEC.md § Configuration.
 type Config struct {
 	Sync      SyncConfig      `toml:"sync"`
@@ -36,7 +36,7 @@ type SyncConfig struct {
 
 type FreshnessConfig struct {
 	// Gate enables the fanotify blocking path (requires pdrive-gate as root).
-	// When false, or when the gate is unreachable, pdrive falls back to
+	// When false, or when the gate is unreachable, pDrive falls back to
 	// inotify hints plus adaptive polling.
 	Gate bool `toml:"gate"`
 	// MaxBlockMS is the hard ceiling on how long a directory listing may be

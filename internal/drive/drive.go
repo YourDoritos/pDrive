@@ -58,7 +58,7 @@ func (nopLogger) Debugf(string, ...interface{}) {}
 
 // Options configures Open.
 type Options struct {
-	// Session is the authenticated pdrive session.
+	// Session is the authenticated pDrive session.
 	Session *api.Session
 	// Log receives diagnostics. Optional.
 	Log Logger
@@ -78,10 +78,10 @@ type Options struct {
 	OnDeauth func()
 }
 
-// Open establishes a Drive session from an existing pdrive session.
+// Open establishes a Drive session from an existing pDrive session.
 //
 // The bridge cannot perform a 2FA login itself, but it accepts an already
-// authenticated session (UID, tokens and the base64 key passphrase). pdrive
+// authenticated session (UID, tokens and the base64 key passphrase). pDrive
 // does its own SRP + TOTP login in internal/api and hands the result over
 // here, which is what lets 2FA accounts work at all.
 func Open(ctx context.Context, opts Options) (*Drive, error) {
@@ -90,7 +90,7 @@ func Open(ctx context.Context, opts Options) (*Drive, error) {
 		return nil, fmt.Errorf("not logged in")
 	}
 	if session.SaltedKeyPass == "" {
-		return nil, fmt.Errorf("session has no key passphrase — log in again with `pdrive`")
+		return nil, fmt.Errorf("session has no key passphrase — log in again with `pDrive`")
 	}
 	log := opts.Log
 	if log == nil {
@@ -99,7 +99,7 @@ func Open(ctx context.Context, opts Options) (*Drive, error) {
 
 	cfg := bridge.NewDefaultConfig()
 
-	// Identify pdrive honestly. Required by the Proton Drive integration
+	// Identify pDrive honestly. Required by the Proton Drive integration
 	// rules; spoofing a first-party client is forbidden.
 	cfg.AppVersion = api.AppVersion()
 	cfg.UserAgent = api.UserAgent
@@ -166,7 +166,7 @@ func Open(ctx context.Context, opts Options) (*Drive, error) {
 // ErrSessionExpired reports that the stored session can no longer be used and
 // the user must log in again.
 var ErrSessionExpired = errors.New(
-	"your Proton session has expired — run `pdrive` and log in again")
+	"your Proton session has expired — run `pDrive` and log in again")
 
 // isDeadSession recognises the API's permanent-auth-failure signals. Proton
 // returns code 10013 when a refresh token has already been spent or revoked.
@@ -181,7 +181,7 @@ func isDeadSession(err error) bool {
 }
 
 // Close releases the Drive session. It does not revoke the session
-// server-side — pdrive keeps it for the next run.
+// server-side — pDrive keeps it for the next run.
 func (d *Drive) Close() {}
 
 // About returns the account, including quota.

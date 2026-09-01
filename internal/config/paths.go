@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-// pdrive is a per-user application: everything lives under the XDG base
+// pDrive is a per-user application: everything lives under the XDG base
 // directories, owned by the user, mode 0700. Unlike pVPN there is no
 // privileged daemon here and therefore no shared group.
 //
@@ -78,7 +78,7 @@ func SocketPath() string {
 // GateSocketPath returns the pdrive-gate socket path (owned by root).
 func GateSocketPath() string { return "/run/pdrive-gate.sock" }
 
-// EnsureDirs creates every directory pdrive needs, mode 0700.
+// EnsureDirs creates every directory pDrive needs, mode 0700.
 func EnsureDirs() error {
 	for _, dir := range []string{configDir, stateDir, dataDir, cacheDir, TrashDir()} {
 		if err := os.MkdirAll(dir, 0700); err != nil {

@@ -2,6 +2,8 @@ package mirror
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"sort"
@@ -52,6 +54,15 @@ func newFakeDrive() *fakeDrive {
 
 func (f *fakeDrive) addDir(path string) *fakeDrive {
 	f.files[path] = &fakeNode{linkID: "link:" + path, parentID: f.parentIDOf(path), isDir: true}
+	return f
+}
+
+// addFileWithDigest registers a file that publishes a SHA1 digest, as Proton
+// does for every real file.
+func (f *fakeDrive) addFileWithDigest(path, content string) *fakeDrive {
+	f.addFile(path, content)
+	sum := sha1.Sum([]byte(content))
+	f.files[path].digest = hex.EncodeToString(sum[:])
 	return f
 }
 
@@ -175,9 +186,11 @@ func (f *fakeDrive) Upload(_ context.Context, parentLinkID, name string, modTime
 		parent := strings.TrimPrefix(parentLinkID, "link:")
 		path = parent + "/" + name
 	}
+	sum := sha1.Sum(content)
 	f.files[path] = &fakeNode{
 		linkID: "link:" + path, parentID: parentLinkID,
 		content: content, modified: modTime,
+		digest: hex.EncodeToString(sum[:]),
 	}
 	f.uploaded = append(f.uploaded, path)
 	return "link:" + path, nil

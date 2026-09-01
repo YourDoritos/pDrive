@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// tracingTransport logs every HTTP request pdrive makes.
+// tracingTransport logs every HTTP request pDrive makes.
 //
 // Enabled with PDRIVE_TRACE=1. The bridge's bootstrap is opaque from the
 // outside — this is the only way to see exactly which calls it makes and what

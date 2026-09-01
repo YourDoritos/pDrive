@@ -294,7 +294,7 @@ func finishVerify(ctx context.Context, client *api.Client, store *api.SessionSto
 
 // View renders the login screen.
 func (m LoginModel) View() string {
-	title := StyleTitle.Render("pdrive")
+	title := StyleTitle.Render("pDrive")
 	sub := StyleSubtitle.Render("Proton Drive sync for Linux")
 	notice := StyleDisclosure.Render(Disclosure)
 

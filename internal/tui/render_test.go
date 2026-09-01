@@ -8,7 +8,7 @@ import (
 	"github.com/YourDoritos/pdrive/internal/config"
 )
 
-// The third-party disclosure is mandatory wherever pdrive asks for account
+// The third-party disclosure is mandatory wherever pDrive asks for account
 // details. If this test fails, the Proton Drive integration rules are being
 // violated — fix the view, not the test.
 func TestLoginViewAlwaysShowsDisclosure(t *testing.T) {

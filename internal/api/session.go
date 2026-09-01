@@ -135,6 +135,10 @@ func deriveKey() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read /etc/machine-id: %w (is this a Linux system?)", err)
 	}
+	// NOTE: this string is key-derivation input, not a label. Changing it
+	// changes the derived key and makes every existing session file
+	// undecryptable, forcing every user to log in again. It stays exactly as
+	// written, whatever the project is called.
 	salt := []byte("pdrive-session-encryption-v1")
 	return argon2.IDKey(machineID, salt, argonTime, argonMemory, argonThreads, argonKeyLen), nil
 }

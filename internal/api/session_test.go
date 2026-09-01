@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/crypto/argon2"
 )
 
 func newTestStore(t *testing.T) (*SessionStore, string) {
@@ -227,5 +229,30 @@ func TestUpdateTokensWithNoExistingSession(t *testing.T) {
 	}
 	if got.RefreshToken != "refresh-x" {
 		t.Errorf("refresh token = %q", got.RefreshToken)
+	}
+}
+
+// The Argon2 salt is key-derivation input, not a label. If it ever changes,
+// every stored session becomes undecryptable and every user is silently
+// logged out. Pin it.
+func TestSessionSaltIsStable(t *testing.T) {
+	key, err := deriveKey()
+	if err != nil {
+		t.Skipf("cannot derive key here: %v", err)
+	}
+	if len(key) != argonKeyLen {
+		t.Fatalf("key length = %d, want %d", len(key), argonKeyLen)
+	}
+
+	// Derived from the pinned salt; a change to either input moves this.
+	machineID, err := os.ReadFile("/etc/machine-id")
+	if err != nil {
+		t.Skip("no /etc/machine-id")
+	}
+	want := argon2.IDKey(machineID, []byte("pdrive-session-encryption-v1"),
+		argonTime, argonMemory, argonThreads, argonKeyLen)
+	if string(key) != string(want) {
+		t.Error("the session encryption salt changed — every existing session " +
+			"file is now undecryptable and every user must log in again")
 	}
 }

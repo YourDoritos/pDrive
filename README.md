@@ -1,4 +1,4 @@
-# pdrive
+# pDrive
 
 A **Proton Drive sync client for Linux** with a terminal UI. Written in Go.
 
@@ -7,7 +7,7 @@ Put a file in it and it's in the cloud. Add a file on another machine and it
 shows up in your *first* `ls`, not the next one.
 
 > **This is a third-party application not officially supported by Proton.**
-> pdrive is not affiliated with or endorsed by Proton AG.
+> pDrive is not affiliated with or endorsed by Proton AG.
 
 ## Why
 
@@ -20,7 +20,7 @@ The working alternative today is `rclone bisync`, which is a scriptable file
 transfer tool rather than a sync daemon: no live freshness, no conflict copies,
 no move detection, no UI.
 
-pdrive uses rclone's excellent Proton *libraries* but owns the sync engine, the
+pDrive uses rclone's excellent Proton *libraries* but owns the sync engine, the
 state model, and the UX.
 
 ## What makes it feel local
@@ -29,7 +29,7 @@ Proton Drive offers no webhooks or push channel, so every third-party client
 polls. Polling means a stale window — the thing that makes cloud folders on
 Linux feel like cloud folders.
 
-pdrive removes it by intercepting the directory open. An optional root helper
+pDrive removes it by intercepting the directory open. An optional root helper
 (`pdrive-gate`) holds `opendir(2)` via `fanotify` `FAN_OPEN_PERM` for a few
 hundred milliseconds while the daemon reconciles that directory's metadata,
 then releases it. The listing you get is the listing *after* the sync.
@@ -45,7 +45,7 @@ Measured on Linux 7.1.9:
 The hold never waits on file content — only on directory metadata — so a 5 GB
 video's *name* appears instantly and the bytes stream in behind it.
 
-The gate is optional. Without it, pdrive falls back to inotify hints plus
+The gate is optional. Without it, pDrive falls back to inotify hints plus
 adaptive polling and still works, just with a stale window.
 
 ## Status
@@ -57,7 +57,7 @@ actually unlocks.
 **Phase 0.5 — verified backup.** `pdrive backup` mirrors the whole account to
 disk and re-hashes every file. Read-only against Proton by construction. It
 writes both a `manifest.json` and a `sha1sum(1)`-compatible `MANIFEST.sha1`, so
-the copy can be re-checked with standard tools without trusting pdrive:
+the copy can be re-checked with standard tools without trusting pDrive:
 
 ```bash
 pdrive backup                     # ~/pdrive-backup-<date>, then verifies
@@ -86,9 +86,9 @@ phase plan.
 
 ```bash
 make build      # static binary into ./bin
-make install    # installs to ~/.local/bin (no sudo — pdrive runs as you)
+make install    # installs to ~/.local/bin (no sudo — pDrive runs as you)
 make test
-pdrive          # terminal UI
+pDrive          # terminal UI
 ```
 
 ## Paths
@@ -103,7 +103,7 @@ pdrive          # terminal UI
 ## Security notes
 
 Proton offers no app passwords, service accounts, or scoped tokens, so an
-unattended sync daemon necessarily holds full-account credentials. pdrive
+unattended sync daemon necessarily holds full-account credentials. pDrive
 stores its session encrypted at rest (Argon2id + NaCl secretbox, keyed from
 `/etc/machine-id`) with `0600` permissions. That protects against a copied
 file, not against someone who already has read access to your home directory.

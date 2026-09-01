@@ -65,7 +65,7 @@ func (m StatusModel) View() string {
 		row("Size cap", StyleValue.Render(sizeCap(m.cfg.Sync.MaxAutoDownloadSize))),
 	}
 
-	body := StyleTitle.Render("pdrive") + "  " +
+	body := StyleTitle.Render("pDrive") + "  " +
 		StyleSubtitle.Render("signed in") + "\n\n" +
 		lipgloss.JoinVertical(lipgloss.Left, rows...)
 

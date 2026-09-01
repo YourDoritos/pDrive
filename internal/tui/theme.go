@@ -101,7 +101,7 @@ var (
 			Italic(true)
 )
 
-// Disclosure is the notice that must be shown wherever pdrive asks for
+// Disclosure is the notice that must be shown wherever pDrive asks for
 // account credentials.
 const Disclosure = "This is a third-party application not officially supported by Proton."
 

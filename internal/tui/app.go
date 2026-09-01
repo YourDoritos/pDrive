@@ -189,7 +189,7 @@ func (a App) View() string {
 
 	if a.resuming {
 		return "\n" + StyleBox.Render(
-			StyleTitle.Render("pdrive")+"\n\n"+StyleDim.Render("Resuming session…")) + "\n"
+			StyleTitle.Render("pDrive")+"\n\n"+StyleDim.Render("Resuming session…")) + "\n"
 	}
 
 	var body string

@@ -266,6 +266,13 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 		return nil, 0, nil, "", ErrMissingInputUploadAndCollectBlockData
 	}
 
+	// pDrive patch: Proton requires a per-block verification token. Fetch the
+	// material once per revision. See pdrive_blockverify.go.
+	verifier, err := protonDrive.newBlockVerifier(ctx, linkID, revisionID)
+	if err != nil {
+		return nil, 0, nil, "", err
+	}
+
 	totalFileSize := int64(0)
 
 	pendingUploadBlocks := make([]PendingUploadBlocks, 0)
@@ -411,12 +418,13 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 				Size:         int64(len(encData)),
 				EncSignature: encSignatureStr,
 				Hash:         base64Hash,
+				// pDrive patch: required since Proton's Sept 2025 change.
+				Verifier: proton.BlockVerifier{Token: verifier.token(encData)},
 			},
 			encData: encData,
 		})
 	}
-	err := uploadPendingBlocks()
-	if err != nil {
+	if err := uploadPendingBlocks(); err != nil {
 		return nil, 0, nil, "", err
 	}
 

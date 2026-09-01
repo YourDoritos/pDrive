@@ -60,7 +60,7 @@ func NewProtonDrive(ctx context.Context, config *common.Config, authHandler prot
 
 		MIMETYPE holds type, e.g. folder, image/png, etc.
 	*/
-	// pdrive patch: listAllVolumes and getAllShares are independent — the
+	// pDrive patch: listAllVolumes and getAllShares are independent — the
 	// latter feeds only the integrity check below — so they run concurrently,
 	// removing another round trip from startup. See third_party/VENDOR.md.
 	var (
@@ -105,7 +105,7 @@ func NewProtonDrive(ctx context.Context, config *common.Config, authHandler prot
 	// check for main share integrity
 	{
 		mainShareCheck := false
-		shares := allShares // pdrive patch: fetched concurrently above
+		shares := allShares // pDrive patch: fetched concurrently above
 		for i := range shares {
 			if shares[i].ShareID == mainShare.ShareID &&
 				shares[i].LinkID == mainShare.LinkID &&

@@ -24,7 +24,7 @@ type LocalNode struct {
 	Hash string
 }
 
-// ignoredNames are pdrive's own bookkeeping and the scratch files editors and
+// ignoredNames are pDrive's own bookkeeping and the scratch files editors and
 // browsers leave lying around. Uploading these produces conflicts and churn
 // and never anything the user wanted.
 var ignoredNames = []string{
@@ -120,7 +120,7 @@ func (m *Mirror) Scan() (map[string]*LocalNode, error) {
 		// the account.
 		if d.Type()&os.ModeSymlink != 0 {
 			m.emit(Event{Kind: EventWarn, Path: relSlash,
-				Err: fmt.Errorf("symlink skipped: pdrive does not follow links out of the sync folder")})
+				Err: fmt.Errorf("symlink skipped: pDrive does not follow links out of the sync folder")})
 			return nil
 		}
 		if !d.IsDir() && !d.Type().IsRegular() {

@@ -1,4 +1,4 @@
-# pdrive is a per-user application — the daemon runs as you, not root, so a
+# pDrive is a per-user application — the daemon runs as you, not root, so a
 # user-local prefix is the correct default and needs no sudo. (pdrive-gate,
 # arriving in Phase 3, is the one component that installs system-wide.)
 PREFIX ?= $(HOME)/.local

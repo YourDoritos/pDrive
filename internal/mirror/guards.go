@@ -8,7 +8,7 @@ import (
 )
 
 // ErrGuard is returned when a safety guard stops a sync pass. It is never a
-// bug report — it means pdrive saw something that could destroy data and
+// bug report — it means pDrive saw something that could destroy data and
 // refused to continue.
 type ErrGuard struct {
 	Guard  string
@@ -25,7 +25,7 @@ func (e *ErrGuard) Error() string {
 // baseline says it should hold files, something is wrong with the *machine*
 // (an unmounted disk, a renamed folder, a fresh home directory) rather than
 // with the account. Interpreting that as "the user deleted everything" is how
-// sync clients wipe accounts, so pdrive stops instead.
+// sync clients wipe accounts, so pDrive stops instead.
 func (m *Mirror) checkRoot() error {
 	info, err := os.Stat(m.root)
 	if os.IsNotExist(err) {
@@ -52,7 +52,7 @@ func (m *Mirror) checkRoot() error {
 	}
 	if len(entries) == 0 {
 		return &ErrGuard{"missing-root", fmt.Sprintf(
-			"%s is empty but pdrive tracks %d nodes there — refusing to treat this as a mass deletion "+
+			"%s is empty but pDrive tracks %d nodes there — refusing to treat this as a mass deletion "+
 				"(is the disk mounted? was the folder renamed?)", m.root, tracked)}
 	}
 	return nil
@@ -74,7 +74,7 @@ const minDeletionsForGuard = 10
 
 // checkDeletionCliff enforces safety guard 1.
 //
-// A single pass that would remove a large share of everything pdrive tracks
+// A single pass that would remove a large share of everything pDrive tracks
 // is far more likely to be a bug, a bad event batch, or a hostile change than
 // a real intention. It stops and asks.
 func (m *Mirror) checkDeletionCliff(deletions int) error {

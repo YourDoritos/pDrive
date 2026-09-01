@@ -22,7 +22,7 @@ The primary address key is used to create (encrypt) and retrieve (decrypt) data,
 func getAccountKRs(ctx context.Context, c *proton.Client, keyPass, saltedKeyPass []byte) (*crypto.KeyRing, map[string]*crypto.KeyRing, map[string]proton.Address, []byte, error) {
 	/* Code taken and modified from proton-bridge */
 
-	// pdrive: these two are deliberately SEQUENTIAL, despite being
+	// pDrive: these two are deliberately SEQUENTIAL, despite being
 	// independent and costing a round trip each.
 	//
 	// They are the first API calls a process makes. If the stored access

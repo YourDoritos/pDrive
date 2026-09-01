@@ -1,6 +1,6 @@
 // Package backup makes a verified, offline copy of a Proton Drive account.
 //
-// This is Phase 0.5 of the project plan and it is a hard gate: no pdrive code
+// This is Phase 0.5 of the project plan and it is a hard gate: no pDrive code
 // writes to a Proton Drive account until a backup produced here has verified
 // clean. It is read-only against Proton by construction — it lists and
 // downloads, and calls nothing that mutates.
@@ -26,7 +26,7 @@ import (
 const ManifestName = "manifest.json"
 
 // ChecksumName is a sha1sum(1)-compatible checksum file. It exists so the
-// backup can be verified with standard tools and does not depend on pdrive
+// backup can be verified with standard tools and does not depend on pDrive
 // being correct, or even installed.
 const ChecksumName = "MANIFEST.sha1"
 

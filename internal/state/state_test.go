@@ -45,7 +45,7 @@ func TestSchemaVersionRecorded(t *testing.T) {
 	}
 }
 
-// Opening a database written by a newer pdrive must fail loudly rather than
+// Opening a database written by a newer pDrive must fail loudly rather than
 // operate on a schema it does not understand.
 func TestRefusesNewerSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")

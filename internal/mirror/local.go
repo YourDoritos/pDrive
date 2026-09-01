@@ -17,7 +17,7 @@ import (
 //
 // The suffix is deliberately part of the *filename*. A stub can therefore
 // never be mistaken for the real file by any program, at any time, whether or
-// not pdrive is running. Phase 5 replaces this with a sparse file at the real
+// not pDrive is running. Phase 5 replaces this with a sparse file at the real
 // name populated on open via fanotify, which is nicer but only safe while a
 // populator is guaranteed to be alive.
 const StubSuffix = ".pdrive-stub"

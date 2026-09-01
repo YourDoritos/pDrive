@@ -1,5 +1,9 @@
 # Vendored dependencies
 
+Two Proton libraries are vendored, both MIT, both wired in through `replace`
+directives in the top-level `go.mod` so import paths are unchanged and
+re-syncing with upstream is a file copy.
+
 ## Proton-API-Bridge
 
 Source: <https://github.com/rclone/Proton-API-Bridge> @ `v1.0.5` (MIT).
@@ -36,7 +40,7 @@ No upstream source file has been modified. Every local addition lives in
 The Drive event API (`GetLatestVolumeEventID`, `GetVolumeEvent`) lives on
 `*proton.Client`, which the bridge holds unexported. Event-cursor sync is not
 optional — the Proton Drive integration rules explicitly forbid frequent
-recursive traversals of the file tree — so pdrive must reach it.
+recursive traversals of the file tree — so pDrive must reach it.
 
 The alternative, constructing a second `proton.Client` from the same session,
 would put two independent refresh loops on one rotating refresh token. Proton
@@ -77,3 +81,62 @@ go mod download github.com/rclone/Proton-API-Bridge@vX.Y.Z
 cp -r "$(go env GOMODCACHE)"/github.com/rclone/\!proton-\!a\!p\!i-\!bridge@vX.Y.Z/. third_party/Proton-API-Bridge/
 # then re-apply the removals above; pdrive_access.go is untouched by the copy
 ```
+
+---
+
+## go-proton-api
+
+Source: <https://github.com/rclone/go-proton-api> @ `v1.0.4` (MIT).
+
+### Why vendored
+
+Proton's storage backend requires a per-block **verification token** in
+`POST /drive/blocks`. Without it every upload is rejected:
+
+```
+400 POST /drive/blocks: You are using an outdated version of the app.
+Please update to upload this file. (Code=2000)
+```
+
+This has left uploads broken in every Go client, rclone included, since
+September 2025, and the rclone forum reports the backend as unmaintained with
+no released fix. The endpoint that supplies the verification material and the
+request field that carries the token both live in this library.
+
+Ruled out before patching: the `x-pm-appversion` header. Uploads failed
+identically with `0.1.0-alpha`, `0.1.0-beta`, `0.1.0-stable` and
+`1.0.0-stable`, the last matching the shape of rclone's own
+`external-drive-rclone@1.0.0-stable`. The `external-drive-*` scheme is correct
+and accepted; the rejection is about the request body.
+
+### Local changes
+
+| File | Change |
+|---|---|
+| `pdrive_verification.go` | **Added.** `GetRevisionVerification` (v2 volume route) and `GetRevisionVerificationByShare` (older share route, used as fallback). |
+| `block_types.go` | **Modified.** Adds `Verifier BlockVerifier` to `BlockUploadInfo`. |
+| `*_test.go`, `server/`, `cmd/`, `tests/` | **Removed.** Upstream's test server and integration tests. |
+
+### The algorithm
+
+Ported from Proton's own MIT-licensed SDK
+(`client/js/src/internal/upload/blockVerifier.ts` and `cryptoService.ts`):
+
+1. `GET /drive/v2/volumes/{volumeID}/links/{linkID}/revisions/{revisionID}/verification`
+   returns `VerificationCode` (32 bytes, base64) and `ContentKeyPacket`.
+2. For each encrypted block:
+
+   ```
+   verificationToken[i] = verificationCode[i] XOR (encryptedBlock[i] || 0)
+   ```
+
+   The token is always the length of the verification code; the ciphertext is
+   treated as zero-padded when shorter, which happens for the last block of a
+   small file.
+3. The base64 token is sent as `BlockList[].Verifier.Token`.
+
+The Go side lives in `Proton-API-Bridge/pdrive_blockverify.go`, next to block
+encryption. Verified against a live account: single-block and multi-block
+(10 MiB / 3 blocks) uploads both round-trip byte-identically.
+
+This patch is upstreamable to rclone.

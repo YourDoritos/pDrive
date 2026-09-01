@@ -1,4 +1,4 @@
-// Package state is pdrive's sync state database.
+// Package state is pDrive's sync state database.
 //
 // The `nodes` table is the *baseline*: the last state on which the local
 // filesystem and Proton Drive agreed. Reconciliation compares local against
@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"time"
 
-	// Pure-Go SQLite driver: no cgo, so pdrive stays a static binary.
+	// Pure-Go SQLite driver: no cgo, so pDrive stays a static binary.
 	_ "modernc.org/sqlite"
 )
 
@@ -144,7 +144,7 @@ func (s *DB) migrate() error {
 		return err
 	}
 	if current > SchemaVersion {
-		return fmt.Errorf("state database is schema v%d but this pdrive only understands v%d — upgrade pdrive",
+		return fmt.Errorf("state database is schema v%d but this pDrive only understands v%d — upgrade pDrive",
 			current, SchemaVersion)
 	}
 	if current != SchemaVersion {

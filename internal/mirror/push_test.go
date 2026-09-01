@@ -279,7 +279,7 @@ func TestIdenticalEditsOnBothSidesAreNotAConflict(t *testing.T) {
 	}
 }
 
-// Editor scratch files and pdrive's own bookkeeping must never be uploaded.
+// Editor scratch files and pDrive's own bookkeeping must never be uploaded.
 func TestIgnoredFilesAreNotUploaded(t *testing.T) {
 	f := newFakeDrive()
 	m, _, root := newTestMirror(t, f, nil)
@@ -454,4 +454,46 @@ func keys(m map[string]*fakeNode) []string {
 
 func fileName(i int) string {
 	return "file" + string(rune('a'+i%26)) + string(rune('0'+i/26)) + ".txt"
+}
+
+// A file changed only locally must be uploaded, never pulled over and
+// presented as a conflict.
+//
+// Regression test: the pull stage originally compared local against remote
+// and downloaded on any difference, which is a two-way comparison. A local
+// edit then looked like a remote change, the user's own edit was "preserved"
+// against a version nobody had touched, and every local edit produced a
+// spurious conflict copy.
+func TestLocalOnlyEditIsNotAConflict(t *testing.T) {
+	f := newFakeDrive()
+	f.addFileWithDigest("notes.md", "original\n")
+
+	m, _, root := newTestMirror(t, f, nil)
+	mustSyncBoth(t, m)
+
+	writeLocal(t, root, "notes.md", "my local edit\n")
+	// The remote announces an event for the path (as it does after our own
+	// upload) but its content has not changed.
+	f.delta = upsertDelta("link:notes.md", "link:root")
+
+	res := mustSyncBoth(t, m)
+
+	if res.Conflicts != 0 {
+		t.Errorf("conflicts=%d, want 0 — only the local side changed", res.Conflicts)
+	}
+	if res.Downloaded != 0 {
+		t.Errorf("downloaded=%d, want 0 — the remote did not change", res.Downloaded)
+	}
+	if res.Uploaded != 1 {
+		t.Errorf("uploaded=%d, want 1", res.Uploaded)
+	}
+	if got := f.content("notes.md"); got != "my local edit\n" {
+		t.Errorf("remote content = %q, want the local edit", got)
+	}
+	entries, _ := os.ReadDir(root)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "conflict") {
+			t.Errorf("a conflict copy was created for a local-only edit: %s", e.Name())
+		}
+	}
 }

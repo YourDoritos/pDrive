@@ -37,7 +37,7 @@ func (d *Drive) Mkdir(ctx context.Context, parentLinkID, name string) (string, e
 
 // Trash moves a node to Proton's trash.
 //
-// pdrive never permanently deletes anything remotely. Proton's trash is the
+// pDrive never permanently deletes anything remotely. Proton's trash is the
 // user's last line of recovery from a reconciliation mistake, and giving that
 // up to save an API call would be a bad trade.
 func (d *Drive) Trash(ctx context.Context, linkID string, isDir bool) error {

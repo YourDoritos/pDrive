@@ -67,3 +67,5 @@ require (
 
 // Vendored so we can extend it — see third_party/VENDOR.md.
 replace github.com/rclone/Proton-API-Bridge => ./third_party/Proton-API-Bridge
+
+replace github.com/rclone/go-proton-api => ./third_party/go-proton-api

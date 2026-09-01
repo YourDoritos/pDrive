@@ -18,7 +18,7 @@ import (
 
 // cmdBackup mirrors the account to disk and verifies the copy.
 //
-// Phase 0.5 of the plan, and a hard gate: nothing in pdrive writes to a
+// Phase 0.5 of the plan, and a hard gate: nothing in pDrive writes to a
 // Proton Drive account until this has produced a clean verification. It only
 // lists and downloads — no call it makes can modify the account.
 func cmdBackup(args []string) error {
@@ -174,10 +174,10 @@ func loadSession() (*api.Session, *api.SessionStore, error) {
 		return nil, nil, fmt.Errorf("read session: %w", err)
 	}
 	if session == nil || session.AccessToken == "" {
-		return nil, nil, fmt.Errorf("not logged in — run `pdrive` first")
+		return nil, nil, fmt.Errorf("not logged in — run `pDrive` first")
 	}
 	if session.SaltedKeyPass == "" {
-		return nil, nil, fmt.Errorf("session predates key storage — run `pdrive`, log out and back in")
+		return nil, nil, fmt.Errorf("session predates key storage — run `pDrive`, log out and back in")
 	}
 	return session, store, nil
 }
@@ -195,7 +195,7 @@ func openDrive(ctx context.Context, session *api.Session, store *api.SessionStor
 		Log:     log,
 		OnAuth: func(uid, accessToken, refreshToken string) {
 			if err := store.UpdateTokens(uid, accessToken, refreshToken); err != nil {
-				fmt.Fprintf(os.Stderr, "pdrive: WARNING: could not persist refreshed tokens: %v\n", err)
+				fmt.Fprintf(os.Stderr, "pDrive: WARNING: could not persist refreshed tokens: %v\n", err)
 				fmt.Fprintf(os.Stderr, "        the next run will need a fresh login\n")
 			}
 		},

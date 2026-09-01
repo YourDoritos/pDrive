@@ -39,7 +39,7 @@ type Source interface {
 	Upload(ctx context.Context, parentLinkID, name string, modTime time.Time, r io.Reader) (string, error)
 	// Mkdir creates a folder and returns its link ID.
 	Mkdir(ctx context.Context, parentLinkID, name string) (string, error)
-	// Trash moves a node to Proton's trash. pdrive never deletes permanently.
+	// Trash moves a node to Proton's trash. pDrive never deletes permanently.
 	Trash(ctx context.Context, linkID string, isDir bool) error
 	// Move relocates or renames a node without re-uploading its content.
 	Move(ctx context.Context, linkID, newParentID, newName string, isDir bool) error

@@ -5,12 +5,12 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// pdrive local addition. Not present upstream.
+// pDrive local addition. Not present upstream.
 //
 // The bridge keeps its *proton.Client unexported, so the Drive event API
 // (GetLatestVolumeEventID / GetVolumeEvent) is unreachable from outside the
 // package. Event-cursor sync is mandatory — the Proton Drive integration
-// rules forbid recursive tree polling — so pdrive needs access to it.
+// rules forbid recursive tree polling — so pDrive needs access to it.
 //
 // Creating a second client instead would mean two independent token-refresh
 // loops racing over Proton's rotating refresh token, which reliably logs the
@@ -26,7 +26,7 @@ func (protonDrive *ProtonDrive) Client() *proton.Client {
 }
 
 // VolumeID returns the volume that holds the main share. Volume events are
-// the cursor pdrive follows to stay in sync.
+// the cursor pDrive follows to stay in sync.
 func (protonDrive *ProtonDrive) VolumeID() string {
 	if protonDrive.MainShare == nil {
 		return ""

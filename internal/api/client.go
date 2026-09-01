@@ -17,7 +17,7 @@ const (
 	// rclone/go-proton-api's DefaultHostURL.
 	DefaultBaseURL = "https://drive-api.proton.me"
 
-	// AppVersion identifies pdrive to the Proton API.
+	// AppVersion identifies pDrive to the Proton API.
 	//
 	// This value is mandatory and must be honest. From the Proton Drive SDK
 	// integration rules: third-party clients must set x-pm-appversion in the
@@ -30,7 +30,7 @@ const (
 	// part of the string it objects to.
 	DefaultAppVersion = "external-drive-pdrive@0.1.0-alpha"
 
-	// UserAgent deliberately identifies pdrive rather than imitating an
+	// UserAgent deliberately identifies pDrive rather than imitating an
 	// official Proton client.
 	UserAgent = "pdrive/0.1.0 (Linux)"
 

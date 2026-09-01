@@ -1,6 +1,6 @@
-// Command pdrive is the terminal UI for the pdrive Proton Drive sync client.
+// Command pDrive is the terminal UI for the pDrive Proton Drive sync client.
 //
-// pdrive is an unofficial, third-party application. It is not affiliated with
+// pDrive is an unofficial, third-party application. It is not affiliated with
 // or endorsed by Proton AG.
 package main
 
@@ -20,7 +20,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "--version", "-v":
-			fmt.Printf("pdrive %s\n", version)
+			fmt.Printf("pDrive %s\n", version)
 			return
 		case "paths":
 			fmt.Println(config.DebugPaths())
@@ -72,16 +72,16 @@ func main() {
 	}
 
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "pdrive: %v\n", err)
+		fmt.Fprintf(os.Stderr, "pDrive: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func usage() {
-	fmt.Print(`pdrive — Proton Drive sync for Linux (unofficial)
+	fmt.Print(`pDrive — Proton Drive sync for Linux (unofficial)
 
 usage:
-  pdrive                  launch the terminal UI
+  pDrive                  launch the terminal UI
   pdrive sync [flags]     sync the folder both ways
   pdrive get <path>       download a file left as a stub by the size cap
   pdrive status           show what the mirror holds (offline)
@@ -126,7 +126,7 @@ func run() error {
 	// have changed, or the file may be truncated. Drop it and log in again.
 	session, err := store.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "pdrive: discarding unreadable session (%v)\n", err)
+		fmt.Fprintf(os.Stderr, "pDrive: discarding unreadable session (%v)\n", err)
 		_ = store.Delete()
 		session = nil
 	}
