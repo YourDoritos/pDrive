@@ -1,0 +1,9 @@
+/bin/
+/pdrive
+/pdrived
+/pdrivectl
+/pdrive-gate
+*.test
+/dist/*.pkg.tar.zst
+/dist/src/
+/dist/pkg/
