@@ -86,8 +86,9 @@ phase plan.
 
 ```bash
 make build      # static binary into ./bin
+make install    # installs to ~/.local/bin (no sudo — pdrive runs as you)
 make test
-./bin/pdrive    # terminal UI
+pdrive          # terminal UI
 ```
 
 ## Paths

@@ -1,4 +1,7 @@
-PREFIX ?= /usr/local
+# pdrive is a per-user application — the daemon runs as you, not root, so a
+# user-local prefix is the correct default and needs no sudo. (pdrive-gate,
+# arriving in Phase 3, is the one component that installs system-wide.)
+PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")

@@ -532,8 +532,9 @@ Verified against the live account: full mirror, event replay with no walk, mtime
 sub-second precision, size cap producing a stub, `pdrive get` materialising it byte-identically
 to the Phase 0.5 backup.
 
-**Outstanding:** "a file added on the web appears locally" still needs a human to add one —
-pdrive cannot write to the account yet, by design.
+Confirmed end to end: a file added through the Proton Drive web UI (`harvy.js`) arrived in
+`~/pdrive` on the next `pdrive sync` through **event replay with no tree walk**, with its
+remote modification time intact.
 
 ### Phase 2 - Bidirectional
 Local scan + hashing, inotify change detection, debounced upload. Block upload + revision
