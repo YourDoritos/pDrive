@@ -25,12 +25,15 @@ func cmdSync(args []string) error {
 	full := fs.Bool("full", false, "force a full tree walk instead of replaying events")
 	confirm := fs.Bool("confirm-deletions", false, "proceed past the deletion-cliff guard for this pass")
 	quiet := fs.Bool("quiet", false, "only print the summary")
+	timing := fs.Bool("timing", false, "print a breakdown of where the time went")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	started := time.Now()
 
 	m, db, d, err := openMirror(ctx, mirror.Options{
 		ConfirmDeletions: *confirm,
@@ -47,8 +50,6 @@ func cmdSync(args []string) error {
 		return err
 	}
 	fmt.Printf("Syncing %s\n\n", cfg.SyncRoot())
-
-	started := time.Now()
 
 	var res *mirror.Result
 	if *full {
@@ -76,7 +77,43 @@ func cmdSync(args []string) error {
 	if res.Warnings > 0 {
 		fmt.Printf("  %d warning(s)\n", res.Warnings)
 	}
+	if *timing {
+		printTiming(d.Metrics().Snapshot(), time.Since(started))
+	}
 	return nil
+}
+
+// printTiming breaks a pass down by API call.
+//
+// The Phase 3 gate may hold a directory listing for at most max_block_ms, so
+// it matters a great deal which of these costs are paid once at startup (the
+// daemon pays them once and holds the connection) and which are paid per
+// change (those are the ones inside the budget).
+func printTiming(m drive.Metrics, total time.Duration) {
+	fmt.Printf("\nTiming\n")
+	row := func(label string, calls int, d time.Duration) {
+		if calls == 0 {
+			return
+		}
+		fmt.Printf("  %-22s %5d call(s)  %8s total  %8s avg\n",
+			label, calls, d.Round(time.Millisecond), (d / time.Duration(calls)).Round(time.Millisecond))
+	}
+	row("open drive (startup)", m.OpenCalls, m.OpenTime)
+	row("event poll", m.EventPolls, m.EventTime)
+	row("list directory", m.ListCalls, m.ListTime)
+	row("revision attributes", m.AttrCalls, m.AttrTime)
+	row("download", m.DownloadCalls, m.DownloadTime)
+
+	api := m.OpenTime + m.EventTime + m.ListTime + m.AttrTime + m.DownloadTime
+	fmt.Printf("  %-22s %8s total: %s in API calls, %s local\n", "",
+		total.Round(time.Millisecond), api.Round(time.Millisecond),
+		(total - api).Round(time.Millisecond))
+
+	// The number that matters for the gate: everything except one-time
+	// connection setup.
+	perChange := m.EventTime + m.ListTime + m.AttrTime
+	fmt.Printf("  %-22s %8s  (event + list + attrs, excludes startup and downloads)\n",
+		"gate-relevant cost", perChange.Round(time.Millisecond))
 }
 
 // cmdGet downloads a file that was left as a stub by the size cap.

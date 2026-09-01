@@ -87,6 +87,40 @@ getdents64()  -> sees the new entries
 Step (a) matters: it stops `ls` in a loop from hammering Proton. At most one event poll per
 `fresh_window`, and the poll is a single cursor delta, not a tree walk.
 
+### Measured API latency (and why the CLI feels slow)
+
+Measured from this machine, no VPN, September 2026. `pdrive sync --timing`
+reports the breakdown; raw numbers cross-checked with `curl`.
+
+| | |
+|---|---|
+| Raw HTTPS to `drive-api.proton.me`, **cold** connection | **~140 ms** (DNS 1 ms, TCP 40 ms, TLS +50 ms, request ~60 ms) |
+| Same request on a **warm** connection | **~55 ms** |
+| `drive.Open` bootstrap (volumes, share, share list, root link, key unlock) | **0.47 – 2.7 s** — 4-5 sequential cold calls |
+| Event poll, cold CLI invocation | 55 – 320 ms (median ~180) |
+| `ListChildren` for one directory, cold | ~485 ms |
+| `GetActiveRevisionAttrs` per file | **~1 ms — it is a local XAttr decrypt, not an API call** |
+
+Two conclusions that shape the design:
+
+**1. There is no N+1 problem.** Size, modification time and Proton's SHA1 all
+come out of the link's encrypted extended attribute, which `ListChildren`
+already returned. Listing a directory of any size is one API call plus local
+PGP work.
+
+**2. Nearly all of a slow CLI run is per-process startup, and the daemon pays
+it once.** A cold `pdrive sync` that downloads one small file spends roughly
+1.5 s in bootstrap, 0.2 s on the event poll and 0.5 s listing — but a daemon
+holds the Drive session open and keeps a warm connection pool, so the
+steady-state gate path is **one warm event poll, ~55-70 ms**, against a 400 ms
+`max_block_ms` budget. That is 6x headroom, and `fresh_window` removes even
+that for repeat listings.
+
+Latency to Proton is ~55 ms warm and not something a client can improve. What
+*is* ours: `drive.Open` makes its 4-5 bootstrap calls sequentially and repeats
+a `getAllShares` integrity check on every start. Worth parallelising if daemon
+startup ever matters; irrelevant while it happens once.
+
 ### Split privilege: keep root tiny
 
 Two processes. The root one must be small enough to audit in one sitting.

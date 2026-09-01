@@ -3,6 +3,7 @@ package drive
 import (
 	"context"
 	"fmt"
+	"time"
 
 	proton "github.com/rclone/go-proton-api"
 )
@@ -74,7 +75,9 @@ func (d *Drive) PollEvents(ctx context.Context, cursor string) (*Delta, error) {
 		return nil, fmt.Errorf("no event cursor — a full mirror must run first")
 	}
 
+	started := time.Now()
 	ev, err := d.pd.Client().GetVolumeEvent(ctx, volumeID, cursor)
+	d.metrics.add(&d.metrics.EventPolls, &d.metrics.EventTime, started)
 	if err != nil {
 		return nil, fmt.Errorf("poll events: %w", err)
 	}
@@ -117,7 +120,9 @@ func (d *Drive) PollEvents(ctx context.Context, cursor string) (*Delta, error) {
 // Unlike Walk this touches exactly one directory, which is what makes it safe
 // to call in response to an event.
 func (d *Drive) ListDir(ctx context.Context, linkID, prefix string) ([]Node, error) {
+	started := time.Now()
 	children, err := d.pd.ListDirectory(ctx, linkID)
+	d.metrics.add(&d.metrics.ListCalls, &d.metrics.ListTime, started)
 	if err != nil {
 		return nil, fmt.Errorf("list %q: %w", pathOrRoot(prefix), err)
 	}

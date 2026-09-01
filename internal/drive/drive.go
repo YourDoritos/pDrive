@@ -38,8 +38,9 @@ type Node struct {
 
 // Drive is an authenticated Proton Drive session.
 type Drive struct {
-	pd  *bridge.ProtonDrive
-	log Logger
+	pd      *bridge.ProtonDrive
+	log     Logger
+	metrics *Metrics
 }
 
 // Logger receives progress and diagnostic output.
@@ -133,7 +134,11 @@ func Open(ctx context.Context, opts Options) (*Drive, error) {
 		}
 	}
 
+	metrics := &Metrics{}
+	openStarted := time.Now()
+
 	pd, _, err := bridge.NewProtonDrive(ctx, cfg, onAuth, onDeauth)
+	metrics.add(&metrics.OpenCalls, &metrics.OpenTime, openStarted)
 	if err != nil {
 		if isDeadSession(err) {
 			return nil, ErrSessionExpired
@@ -141,7 +146,7 @@ func Open(ctx context.Context, opts Options) (*Drive, error) {
 		return nil, fmt.Errorf("open drive: %w", err)
 	}
 
-	return &Drive{pd: pd, log: log}, nil
+	return &Drive{pd: pd, log: log, metrics: metrics}, nil
 }
 
 // ErrSessionExpired reports that the stored session can no longer be used and
@@ -193,7 +198,9 @@ func (d *Drive) walk(ctx context.Context, linkID, prefix string, fn WalkFunc) er
 		return err
 	}
 
+	started := time.Now()
 	children, err := d.pd.ListDirectory(ctx, linkID)
+	d.metrics.add(&d.metrics.ListCalls, &d.metrics.ListTime, started)
 	if err != nil {
 		return fmt.Errorf("list %q: %w", pathOrRoot(prefix), err)
 	}
@@ -232,7 +239,9 @@ func (d *Drive) walk(ctx context.Context, linkID, prefix string, fn WalkFunc) er
 // Download opens a file's active revision for reading. The caller closes the
 // returned reader. The reported size is the plaintext size.
 func (d *Drive) Download(ctx context.Context, linkID string) (io.ReadCloser, int64, error) {
+	started := time.Now()
 	rc, size, _, err := d.pd.DownloadFileByID(ctx, linkID, 0)
+	d.metrics.add(&d.metrics.DownloadCalls, &d.metrics.DownloadTime, started)
 	if err != nil {
 		return nil, 0, fmt.Errorf("download %s: %w", linkID, err)
 	}
@@ -252,7 +261,9 @@ func pathOrRoot(p string) string {
 // sometimes absent. A file without it is still perfectly downloadable, so a
 // miss is unknown metadata rather than a failure.
 func (d *Drive) fillAttrs(ctx context.Context, link *proton.Link, node *Node) {
+	started := time.Now()
 	attrs, err := d.pd.GetActiveRevisionAttrs(ctx, link)
+	d.metrics.add(&d.metrics.AttrCalls, &d.metrics.AttrTime, started)
 	if err != nil {
 		d.log.Warnf("attributes unavailable for %q: %v", node.Path, err)
 		return
