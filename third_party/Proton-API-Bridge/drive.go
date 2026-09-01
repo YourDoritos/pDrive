@@ -2,6 +2,7 @@ package proton_api_bridge
 
 import (
 	"context"
+	"sync"
 
 	"github.com/rclone/Proton-API-Bridge/common"
 	"golang.org/x/sync/semaphore"
@@ -59,11 +60,32 @@ func NewProtonDrive(ctx context.Context, config *common.Config, authHandler prot
 
 		MIMETYPE holds type, e.g. folder, image/png, etc.
 	*/
-	volumes, err := listAllVolumes(ctx, c)
-	if err != nil {
-		return nil, nil, err
+	// pdrive patch: listAllVolumes and getAllShares are independent — the
+	// latter feeds only the integrity check below — so they run concurrently,
+	// removing another round trip from startup. See third_party/VENDOR.md.
+	var (
+		volumes    []proton.Volume
+		allShares  []proton.ShareMetadata
+		bootWG     sync.WaitGroup
+		volumesErr error
+		sharesErr  error
+	)
+	bootWG.Add(2)
+	go func() {
+		defer bootWG.Done()
+		volumes, volumesErr = listAllVolumes(ctx, c)
+	}()
+	go func() {
+		defer bootWG.Done()
+		allShares, sharesErr = getAllShares(ctx, c)
+	}()
+	bootWG.Wait()
+	if volumesErr != nil {
+		return nil, nil, volumesErr
 	}
-	// log.Printf("all volumes %#v", volumes)
+	if sharesErr != nil {
+		return nil, nil, sharesErr
+	}
 
 	mainShareID := ""
 	for i := range volumes {
@@ -83,10 +105,7 @@ func NewProtonDrive(ctx context.Context, config *common.Config, authHandler prot
 	// check for main share integrity
 	{
 		mainShareCheck := false
-		shares, err := getAllShares(ctx, c)
-		if err != nil {
-			return nil, nil, err
-		}
+		shares := allShares // pdrive patch: fetched concurrently above
 		for i := range shares {
 			if shares[i].ShareID == mainShare.ShareID &&
 				shares[i].LinkID == mainShare.LinkID &&

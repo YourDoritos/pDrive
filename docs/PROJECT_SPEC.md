@@ -116,10 +116,30 @@ steady-state gate path is **one warm event poll, ~55-70 ms**, against a 400 ms
 `max_block_ms` budget. That is 6x headroom, and `fresh_window` removes even
 that for repeat listings.
 
-Latency to Proton is ~55 ms warm and not something a client can improve. What
-*is* ours: `drive.Open` makes its 4-5 bootstrap calls sequentially and repeats
-a `getAllShares` integrity check on every start. Worth parallelising if daemon
-startup ever matters; irrelevant while it happens once.
+**3. Six of the seven requests in a `pdrive sync` are bootstrap.**
+`PDRIVE_TRACE=1` prints every request:
+
+```
+#1  /core/v4/users            #4  /drive/shares/{id}
+#2  /core/v4/addresses        #5  /drive/shares          (integrity check)
+#3  /drive/volumes            #6  /drive/shares/{id}/links/{root}
+#7  /drive/volumes/{id}/events/{cursor}   <- the only one doing any work
+```
+
+A daemon makes #1-#6 once at startup and then one request per sync.
+
+**Authenticated latency is highly variable and outside our control.** The same
+six calls, same code, same connection, measured across runs: 45-79 ms each on
+a good run, 230-410 ms each on a bad one, with every request in a run fast or
+slow together. Not IPv6 (single A record), not rapid-fire throttling (spacing
+runs six seconds apart did not help). Unauthenticated requests are steady at
+~145 ms, but they are not comparable — Proton can reject those without
+touching a backend.
+
+`volumes` and `shares` now run concurrently (see third_party/VENDOR.md), which
+removes one round trip. The first two calls deliberately do **not**, because
+parallelising them races two token refreshes — that lesson is written up in
+VENDOR.md.
 
 ### Split privilege: keep root tiny
 

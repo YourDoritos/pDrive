@@ -22,17 +22,29 @@ The primary address key is used to create (encrypt) and retrieve (decrypt) data,
 func getAccountKRs(ctx context.Context, c *proton.Client, keyPass, saltedKeyPass []byte) (*crypto.KeyRing, map[string]*crypto.KeyRing, map[string]proton.Address, []byte, error) {
 	/* Code taken and modified from proton-bridge */
 
+	// pdrive: these two are deliberately SEQUENTIAL, despite being
+	// independent and costing a round trip each.
+	//
+	// They are the first API calls a process makes. If the stored access
+	// token has expired, running them concurrently means both receive a 401
+	// and each fires its own POST /auth/v4/refresh. Proton rotates the
+	// refresh token and invalidates the previous one on every refresh, so two
+	// in flight at once is a race that can spend the token twice and leave
+	// the session dead with Code=10013.
+	//
+	// Observed in practice while benchmarking: parallelising these produced
+	// two concurrent refreshes on a cold start. Parallelism after this point
+	// is safe, because the token is known good by then — see the concurrent
+	// volumes/shares fetch in drive.go.
 	user, err := c.GetUser(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	// log.Printf("user %#v", user)
 
 	addrsArr, err := c.GetAddresses(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	// log.Printf("addr %#v", addr)
 
 	if saltedKeyPass == nil {
 		if keyPass == nil {

@@ -109,6 +109,10 @@ func Open(ctx context.Context, opts Options) (*Drive, error) {
 	// encrypted; the bridge's cache is not.
 	cfg.CredentialCacheFile = ""
 
+	// PDRIVE_TRACE=1 logs every HTTP request, including the bridge's
+	// otherwise-opaque bootstrap.
+	cfg.Transport = newTracingTransport(nil)
+
 	cfg.UseReusableLogin = true
 	cfg.ReusableCredential = &common.ReusableCredentialData{
 		UID:           session.UID,
