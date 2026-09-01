@@ -101,7 +101,7 @@ func Open(ctx context.Context, opts Options) (*Drive, error) {
 
 	// Identify pdrive honestly. Required by the Proton Drive integration
 	// rules; spoofing a first-party client is forbidden.
-	cfg.AppVersion = api.AppVersion
+	cfg.AppVersion = api.AppVersion()
 	cfg.UserAgent = api.UserAgent
 	cfg.Logger = log
 
@@ -121,6 +121,16 @@ func Open(ctx context.Context, opts Options) (*Drive, error) {
 		SaltedKeyPass: session.SaltedKeyPass,
 	}
 	cfg.FirstLoginCredential = &common.FirstLoginCredentialData{}
+
+	// A failed upload leaves a draft revision behind, and Proton then refuses
+	// further uploads to that path until it is cleared. Without this, one
+	// transient failure permanently blocks a file from ever syncing.
+	//
+	// The tradeoff: if another device is genuinely mid-upload to the same
+	// path, its draft is replaced. That is the lesser problem — a lost
+	// in-flight upload retries, whereas a stuck draft needs manual
+	// intervention the user has no tool for.
+	cfg.ReplaceExistingDraft = true
 
 	// Be conservative with concurrency. The integration rules warn that
 	// excessive parallelism gets the application and the account

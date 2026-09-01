@@ -43,6 +43,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "conflicts":
+			if err := cmdConflicts(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "pdrive conflicts: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "status":
 			if err := cmdStatus(os.Args[2:]); err != nil {
 				fmt.Fprintf(os.Stderr, "pdrive status: %v\n", err)
@@ -76,9 +82,10 @@ func usage() {
 
 usage:
   pdrive                  launch the terminal UI
-  pdrive sync [flags]     bring the sync folder up to date (download only)
+  pdrive sync [flags]     sync the folder both ways
   pdrive get <path>       download a file left as a stub by the size cap
   pdrive status           show what the mirror holds (offline)
+  pdrive conflicts        list preserved local copies (offline)
   pdrive backup [flags]   make a separate verified archive of the account
   pdrive verify <dir>     re-check an existing backup (offline)
   pdrive version          print the version
@@ -87,6 +94,7 @@ usage:
 
 sync flags:
   --full                 force a full tree walk instead of replaying events
+  --down-only            download only; never modify the Proton Drive account
   --confirm-deletions    proceed past the deletion-cliff guard for one pass
   --quiet                only print the summary
 

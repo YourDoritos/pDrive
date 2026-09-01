@@ -398,3 +398,46 @@ func escapeLike(s string) string {
 	}
 	return string(out)
 }
+
+// RecordConflict logs a preserved local copy.
+func (s *DB) RecordConflict(path, keptLocal, remoteRevision string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO conflicts(path, kept_local, remote_revision, at) VALUES(?, ?, ?, ?)`,
+		path, keptLocal, remoteRevision, time.Now().Unix())
+	if err != nil {
+		return fmt.Errorf("record conflict for %q: %w", path, err)
+	}
+	return nil
+}
+
+// Conflict is one logged conflict.
+type Conflict struct {
+	Path      string
+	KeptLocal string
+	RemoteRev string
+	At        time.Time
+}
+
+// Conflicts returns logged conflicts, newest first.
+func (s *DB) Conflicts() ([]Conflict, error) {
+	rows, err := s.db.Query(
+		`SELECT path, kept_local, remote_revision, at FROM conflicts ORDER BY at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list conflicts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Conflict
+	for rows.Next() {
+		var c Conflict
+		var at int64
+		if err := rows.Scan(&c.Path, &c.KeptLocal, &c.RemoteRev, &at); err != nil {
+			return nil, err
+		}
+		if at != 0 {
+			c.At = time.Unix(at, 0)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

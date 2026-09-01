@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -22,7 +23,12 @@ const (
 	// integration rules: third-party clients must set x-pm-appversion in the
 	// documented shape and must not masquerade as a first-party client.
 	// Format: external-drive-{name}@{semver}[-{channel}][+{build}]
-	AppVersion = "external-drive-pdrive@0.1.0-alpha"
+	//
+	// Overridable via PDRIVE_APPVERSION for diagnosis: Proton gates some
+	// endpoints on a minimum client version, and the rejection message
+	// ("You are using an outdated version of the app") does not say which
+	// part of the string it objects to.
+	DefaultAppVersion = "external-drive-pdrive@0.1.0-alpha"
 
 	// UserAgent deliberately identifies pdrive rather than imitating an
 	// official Proton client.
@@ -31,6 +37,14 @@ const (
 	DefaultTimeout = 30 * time.Second
 	MaxRetries     = 3
 )
+
+// AppVersion returns the value sent in x-pm-appversion.
+func AppVersion() string {
+	if v := os.Getenv("PDRIVE_APPVERSION"); v != "" {
+		return v
+	}
+	return DefaultAppVersion
+}
 
 // Client is the Proton API client: authenticated requests, automatic token
 // refresh, bounded retry.
@@ -219,7 +233,7 @@ func (c *Client) doSingleRequest(ctx context.Context, method, path string, body,
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-pm-appversion", AppVersion)
+	req.Header.Set("x-pm-appversion", AppVersion())
 	req.Header.Set("User-Agent", UserAgent)
 
 	c.mu.RLock()

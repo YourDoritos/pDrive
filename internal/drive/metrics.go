@@ -29,6 +29,14 @@ type Metrics struct {
 	DownloadCalls int
 	DownloadTime  time.Duration
 	DownloadBytes int64
+
+	UploadCalls int
+	UploadTime  time.Duration
+	UploadBytes int64
+
+	// MutateCalls covers folder creation, moves and trashing.
+	MutateCalls int
+	MutateTime  time.Duration
 }
 
 func (m *Metrics) add(calls *int, total *time.Duration, started time.Time) {
@@ -38,17 +46,49 @@ func (m *Metrics) add(calls *int, total *time.Duration, started time.Time) {
 	*total += time.Since(started)
 }
 
+// MetricsSnapshot is a plain copy of Metrics, safe to pass around.
+//
+// Metrics itself holds a mutex and must never be copied by value; go vet
+// enforces that.
+type MetricsSnapshot struct {
+	OpenCalls int
+	OpenTime  time.Duration
+
+	EventPolls int
+	EventTime  time.Duration
+
+	ListCalls int
+	ListTime  time.Duration
+
+	AttrCalls int
+	AttrTime  time.Duration
+
+	DownloadCalls int
+	DownloadTime  time.Duration
+	DownloadBytes int64
+
+	UploadCalls int
+	UploadTime  time.Duration
+	UploadBytes int64
+
+	MutateCalls int
+	MutateTime  time.Duration
+}
+
 // Snapshot returns a copy safe to read without the lock.
-func (m *Metrics) Snapshot() Metrics {
+func (m *Metrics) Snapshot() MetricsSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return Metrics{
+	return MetricsSnapshot{
 		OpenCalls: m.OpenCalls, OpenTime: m.OpenTime,
 		EventPolls: m.EventPolls, EventTime: m.EventTime,
 		ListCalls: m.ListCalls, ListTime: m.ListTime,
 		AttrCalls: m.AttrCalls, AttrTime: m.AttrTime,
 		DownloadCalls: m.DownloadCalls, DownloadTime: m.DownloadTime,
 		DownloadBytes: m.DownloadBytes,
+		UploadCalls:   m.UploadCalls, UploadTime: m.UploadTime,
+		UploadBytes: m.UploadBytes,
+		MutateCalls: m.MutateCalls, MutateTime: m.MutateTime,
 	}
 }
 

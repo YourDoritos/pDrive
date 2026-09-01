@@ -591,10 +591,67 @@ Confirmed end to end: a file added through the Proton Drive web UI (`harvy.js`) 
 `~/pdrive` on the next `pdrive sync` through **event replay with no tree walk**, with its
 remote modification time intact.
 
-### Phase 2 - Bidirectional
-Local scan + hashing, inotify change detection, debounced upload. Block upload + revision
-commit; extend the bridge for 2FA-authed sessions. Full reconciler, conflict copies, move
-detection. All eight safety guards, with tests that actively try to destroy data.
+### BLOCKER: Proton's block-upload verification (discovered Phase 2)
+
+**Uploads from every Go client — rclone included — have been broken since
+September 2025.** This is not a pdrive bug; the entire ecosystem is affected.
+
+Proton's storage backend now requires a per-block **verification token** in
+`POST /drive/blocks`. Requests without one are rejected:
+
+```
+400 POST /drive/blocks: You are using an outdated version of the app.
+Please update to upload this file. (Code=2000)
+```
+
+Ruled out first: the `x-pm-appversion` string. Uploads fail identically with
+`0.1.0-alpha`, `0.1.0-beta`, `0.1.0-stable` and `1.0.0-stable` — the last being
+byte-identical in shape to rclone's own `external-drive-rclone@1.0.0-stable`.
+The `external-drive-*` scheme is correct and accepted; the rejection is about
+the request body, not the header.
+
+`rclone/Proton-API-Bridge` v1.0.5 predates the change and the rclone forum
+reports the backend as effectively unmaintained, with no released fix.
+
+**The algorithm is public.** It is in Proton's own MIT-licensed SDK at
+`client/js/src/internal/upload/`:
+
+1. `GET /drive/shares/{shareID}/links/{linkID}/revisions/{revisionID}/verification`
+   returns a `VerificationCode` (32 bytes) and a `ContentKeyPacket`.
+2. For a new small file the verification code is instead the **last 32 bytes**
+   of the content key packet (`blockVerifier.ts`, `getVerificationCode`).
+3. Per block (`cryptoService.ts`, `verifyBlock`):
+
+   ```
+   verificationToken[i] = verificationCode[i] XOR (encryptedBlock[i] || 0)
+   ```
+
+   The ciphertext is zero-padded when shorter than the code. The SDK also
+   decrypts the block first as a bitflip check before computing the token.
+4. The token is sent alongside each block.
+
+**Work required:** vendor `go-proton-api` as well (it owns the endpoint and the
+block-upload request types), add the verification endpoint, add the `Verifier`
+field, and port the ~40 lines above into the bridge's
+`uploadAndCollectBlockData`.
+
+Worth noting: this would make pdrive the only working Go implementation of
+Proton Drive upload, and the patch is upstreamable to rclone.
+
+### Phase 2 - Bidirectional — ENGINE DONE, UPLOAD BLOCKED
+
+Done: local scanner with lazy hashing, the pure three-way reconciler, conflict copies,
+move/rename detection, local-deletion propagation to Proton's trash, and the guards applied in
+both directions. 127 tests, including an exhaustive sweep of all 1,458 reconciler input
+combinations asserting no input can produce silent data loss.
+
+Downloads, listing, moves, folder creation and trashing all work against the live account.
+**Only the block-upload path is blocked**, by the Proton-side change documented above.
+
+Deferred to Phase 3, where the daemon gives them somewhere to live: inotify change detection
+and debounced upload. Phase 2 detects local changes by scanning, which is correct but not
+instant.
+
 **Done when:** two machines converge under concurrent edits and nothing is ever lost.
 
 ### Phase 3 - Daemon + gate

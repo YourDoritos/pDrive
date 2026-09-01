@@ -37,6 +37,19 @@ const (
 	EventDelete
 	// EventWarn reports a non-fatal problem.
 	EventWarn
+	// EventUpload reports a file sent to Proton Drive.
+	EventUpload
+	// EventMkdirRemote reports a folder created remotely.
+	EventMkdirRemote
+	// EventMove reports a node moved or renamed remotely instead of
+	// re-uploaded.
+	EventMove
+	// EventTrashRemote reports a node moved to Proton's trash after being
+	// deleted locally.
+	EventTrashRemote
+	// EventConflict reports that both sides changed and both versions were
+	// kept.
+	EventConflict
 )
 
 // Event is a progress notification.
@@ -49,13 +62,20 @@ type Event struct {
 
 // Result summarises a pass.
 type Result struct {
-	Dirs        int
-	Downloaded  int
-	Stubbed     int
-	Skipped     int
-	Deleted     int
-	Warnings    int
-	Bytes       int64
+	Dirs       int
+	Downloaded int
+	Stubbed    int
+	Skipped    int
+	Deleted    int
+	Warnings   int
+	Bytes      int64
+
+	Uploaded      int
+	UploadedBytes int64
+	Moved         int
+	TrashedRemote int
+	Conflicts     int
+
 	FullMirror  bool
 	CursorMoved bool
 }
@@ -71,6 +91,16 @@ type Mirror struct {
 
 	progress func(Event)
 	result   Result
+
+	// localBefore is the local scan taken before the pull stage, so a
+	// download can recognise that it is about to overwrite a local edit.
+	localBefore map[string]*LocalNode
+	// moveTargets are local paths already accounted for as the destination
+	// of a move, so the push stage does not also upload them.
+	moveTargets map[string]bool
+
+	// hostname names this machine in conflict copies.
+	hostname string
 }
 
 // Options configures a Mirror.
@@ -107,6 +137,8 @@ func New(d Source, db *state.DB, opts Options) (*Mirror, error) {
 	if err := os.MkdirAll(m.trashDir, 0700); err != nil {
 		return nil, fmt.Errorf("create trash directory: %w", err)
 	}
+	m.hostname, _ = os.Hostname()
+	m.moveTargets = map[string]bool{}
 	return m, nil
 }
 
@@ -380,10 +412,9 @@ func (m *Mirror) applyNode(ctx context.Context, n drive.Node) error {
 	}
 	defer rc.Close()
 
-	// A stub may be standing where the real file now belongs.
-	_ = os.Remove(local + StubSuffix)
-
-	sum, written, err := writeFileAtomic(local, rc, n.Modified)
+	// Stage first. Holding both versions at once turns conflict detection
+	// into an exact hash comparison instead of an inference from metadata.
+	tmp, sum, written, err := stageDownload(local, rc)
 	if err != nil {
 		return err
 	}
@@ -391,6 +422,20 @@ func (m *Mirror) applyNode(ctx context.Context, n drive.Node) error {
 	if n.Digest != "" && !strings.EqualFold(sum, n.Digest) {
 		m.emit(Event{Kind: EventWarn, Path: n.Path,
 			Err: fmt.Errorf("content hash %s disagrees with Proton's digest %s", sum, n.Digest)})
+	}
+
+	// Only now, knowing exactly what is arriving, decide whether the file
+	// about to be replaced holds work that exists nowhere else.
+	if err := m.preserveLocalIfConflicting(n.Path, sum); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+
+	// A stub may be standing where the real file now belongs.
+	_ = os.Remove(local + StubSuffix)
+
+	if err := commitStaged(tmp, local, n.Modified); err != nil {
+		return err
 	}
 
 	info, err := os.Stat(local)
@@ -480,8 +525,11 @@ func (m *Mirror) Materialize(ctx context.Context, path string) error {
 	}
 	defer rc.Close()
 
-	sum, written, err := writeFileAtomic(local, rc, node.LocalMtime)
+	tmp, sum, written, err := stageDownload(local, rc)
 	if err != nil {
+		return err
+	}
+	if err := commitStaged(tmp, local, node.LocalMtime); err != nil {
 		return err
 	}
 	_ = os.Remove(local + StubSuffix)

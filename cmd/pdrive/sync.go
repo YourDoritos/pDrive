@@ -23,6 +23,7 @@ import (
 func cmdSync(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	full := fs.Bool("full", false, "force a full tree walk instead of replaying events")
+	downOnly := fs.Bool("down-only", false, "download only; never modify the Proton Drive account")
 	confirm := fs.Bool("confirm-deletions", false, "proceed past the deletion-cliff guard for this pass")
 	quiet := fs.Bool("quiet", false, "only print the summary")
 	timing := fs.Bool("timing", false, "print a breakdown of where the time went")
@@ -52,10 +53,13 @@ func cmdSync(args []string) error {
 	fmt.Printf("Syncing %s\n\n", cfg.SyncRoot())
 
 	var res *mirror.Result
-	if *full {
+	switch {
+	case *full:
 		res, err = m.FullMirror(ctx)
-	} else {
+	case *downOnly:
 		res, err = m.Sync(ctx)
+	default:
+		res, err = m.SyncBoth(ctx)
 	}
 	if err != nil {
 		var guard *mirror.ErrGuard
@@ -72,8 +76,15 @@ func cmdSync(args []string) error {
 	} else {
 		fmt.Printf("Event replay in %s.\n", time.Since(started).Round(time.Second))
 	}
-	fmt.Printf("  %d downloaded (%s), %d stubbed, %d unchanged, %d removed, %d folders\n",
-		res.Downloaded, humanBytes(res.Bytes), res.Stubbed, res.Skipped, res.Deleted, res.Dirs)
+	fmt.Printf("  down: %d downloaded (%s), %d stubbed, %d unchanged, %d removed\n",
+		res.Downloaded, humanBytes(res.Bytes), res.Stubbed, res.Skipped, res.Deleted)
+	if res.Uploaded > 0 || res.Moved > 0 || res.TrashedRemote > 0 || res.Dirs > 0 {
+		fmt.Printf("  up:   %d uploaded (%s), %d moved, %d trashed, %d folders\n",
+			res.Uploaded, humanBytes(res.UploadedBytes), res.Moved, res.TrashedRemote, res.Dirs)
+	}
+	if res.Conflicts > 0 {
+		fmt.Printf("  %d conflict(s) — both versions kept; see `pdrive conflicts`\n", res.Conflicts)
+	}
 	if res.Warnings > 0 {
 		fmt.Printf("  %d warning(s)\n", res.Warnings)
 	}
@@ -89,7 +100,7 @@ func cmdSync(args []string) error {
 // it matters a great deal which of these costs are paid once at startup (the
 // daemon pays them once and holds the connection) and which are paid per
 // change (those are the ones inside the budget).
-func printTiming(m drive.Metrics, total time.Duration) {
+func printTiming(m drive.MetricsSnapshot, total time.Duration) {
 	fmt.Printf("\nTiming\n")
 	row := func(label string, calls int, d time.Duration) {
 		if calls == 0 {
@@ -103,8 +114,11 @@ func printTiming(m drive.Metrics, total time.Duration) {
 	row("list directory", m.ListCalls, m.ListTime)
 	row("revision attributes", m.AttrCalls, m.AttrTime)
 	row("download", m.DownloadCalls, m.DownloadTime)
+	row("upload", m.UploadCalls, m.UploadTime)
+	row("create/move/trash", m.MutateCalls, m.MutateTime)
 
-	api := m.OpenTime + m.EventTime + m.ListTime + m.AttrTime + m.DownloadTime
+	api := m.OpenTime + m.EventTime + m.ListTime + m.AttrTime + m.DownloadTime +
+		m.UploadTime + m.MutateTime
 	fmt.Printf("  %-22s %8s total: %s in API calls, %s local\n", "",
 		total.Round(time.Millisecond), api.Round(time.Millisecond),
 		(total - api).Round(time.Millisecond))
@@ -260,6 +274,55 @@ func syncProgress(quiet bool) func(mirror.Event) {
 			}
 		case mirror.EventDelete:
 			fmt.Printf("  gone   %s (moved to local trash)\n", ev.Path)
+		case mirror.EventUpload:
+			if !quiet {
+				fmt.Printf("  put    %s (%s)\n", ev.Path, humanBytes(ev.Size))
+			}
+		case mirror.EventMkdirRemote:
+			if !quiet {
+				fmt.Printf("  mkdir  %s/ (remote)\n", ev.Path)
+			}
+		case mirror.EventMove:
+			fmt.Printf("  move   %s\n", ev.Path)
+		case mirror.EventTrashRemote:
+			fmt.Printf("  trash  %s (moved to Proton trash)\n", ev.Path)
+		case mirror.EventConflict:
+			fmt.Printf("  CONFLICT %s\n", ev.Path)
 		}
 	}
+}
+
+// cmdConflicts lists preserved local copies. Offline.
+func cmdConflicts(args []string) error {
+	fs := flag.NewFlagSet("conflicts", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	db, err := state.Open(config.StateDB())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	conflicts, err := db.Conflicts()
+	if err != nil {
+		return err
+	}
+	if len(conflicts) == 0 {
+		fmt.Println("No conflicts recorded.")
+		return nil
+	}
+
+	fmt.Printf("%d conflict(s). Both versions were kept — nothing was discarded.\n\n", len(conflicts))
+	for _, c := range conflicts {
+		fmt.Printf("  %s\n", c.Path)
+		fmt.Printf("    remote version is at that path; your local copy was kept as:\n")
+		fmt.Printf("    %s\n", c.KeptLocal)
+		if !c.At.IsZero() {
+			fmt.Printf("    (%s)\n", c.At.Local().Format("2006-01-02 15:04"))
+		}
+		fmt.Println()
+	}
+	return nil
 }

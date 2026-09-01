@@ -24,6 +24,10 @@ type fakeDrive struct {
 	listed  int
 	polled  int
 	refresh bool
+
+	uploaded []string
+	trashed  []string
+	moved    []string
 }
 
 type fakeNode struct {
@@ -156,3 +160,77 @@ func (f *fakeDrive) Download(_ context.Context, linkID string) (io.ReadCloser, i
 }
 
 var _ Source = (*fakeDrive)(nil)
+
+func (f *fakeDrive) Upload(_ context.Context, parentLinkID, name string, modTime time.Time, r io.Reader) (string, error) {
+	if err, ok := f.failOn["upload:"+name]; ok {
+		return "", err
+	}
+	content, err := io.ReadAll(r)
+	if err != nil {
+		return "", err
+	}
+
+	path := name
+	if parentLinkID != "link:root" {
+		parent := strings.TrimPrefix(parentLinkID, "link:")
+		path = parent + "/" + name
+	}
+	f.files[path] = &fakeNode{
+		linkID: "link:" + path, parentID: parentLinkID,
+		content: content, modified: modTime,
+	}
+	f.uploaded = append(f.uploaded, path)
+	return "link:" + path, nil
+}
+
+func (f *fakeDrive) Mkdir(_ context.Context, parentLinkID, name string) (string, error) {
+	path := name
+	if parentLinkID != "link:root" {
+		path = strings.TrimPrefix(parentLinkID, "link:") + "/" + name
+	}
+	f.files[path] = &fakeNode{linkID: "link:" + path, parentID: parentLinkID, isDir: true}
+	return "link:" + path, nil
+}
+
+func (f *fakeDrive) Trash(_ context.Context, linkID string, _ bool) error {
+	for path, n := range f.files {
+		if n.linkID == linkID {
+			delete(f.files, path)
+			f.trashed = append(f.trashed, path)
+			return nil
+		}
+	}
+	return fmt.Errorf("no such link %s", linkID)
+}
+
+func (f *fakeDrive) Move(_ context.Context, linkID, newParentID, newName string, _ bool) error {
+	for path, n := range f.files {
+		if n.linkID != linkID {
+			continue
+		}
+		newPath := newName
+		if newParentID != "link:root" {
+			newPath = strings.TrimPrefix(newParentID, "link:") + "/" + newName
+		}
+		delete(f.files, path)
+		n.parentID = newParentID
+		n.linkID = "link:" + newPath
+		f.files[newPath] = n
+		f.moved = append(f.moved, path+" -> "+newPath)
+		return nil
+	}
+	return fmt.Errorf("no such link %s", linkID)
+}
+
+// content returns a remote file's bytes, for assertions.
+func (f *fakeDrive) content(path string) string {
+	if n, ok := f.files[path]; ok {
+		return string(n.content)
+	}
+	return ""
+}
+
+func (f *fakeDrive) has(path string) bool {
+	_, ok := f.files[path]
+	return ok
+}

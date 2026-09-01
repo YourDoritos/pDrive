@@ -25,19 +25,23 @@ const StubSuffix = ".pdrive-stub"
 // TempSuffix marks an in-progress download.
 const TempSuffix = ".pdrive-part"
 
-// writeFileAtomic streams r into path via a temporary file on the same
-// filesystem, fsyncs it, and only then renames it into place. A crash mid
-// download can therefore never leave a truncated file at the real path.
-// It returns the SHA1 of the content and the number of bytes written.
-func writeFileAtomic(path string, r io.Reader, mtime time.Time) (string, int64, error) {
+// stageDownload streams r into a temporary file beside its destination and
+// returns the temp path, the content's SHA1 and the byte count.
+//
+// Staging before deciding anything is what makes conflict detection exact: we
+// end up holding the incoming content and the existing local file at the same
+// time, so "did this actually change?" is a hash comparison rather than an
+// inference from metadata we may not have. It also means a crash mid-download
+// can never leave a truncated file at the real path.
+func stageDownload(path string, r io.Reader) (string, string, int64, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return "", 0, fmt.Errorf("create parent directory: %w", err)
+		return "", "", 0, fmt.Errorf("create parent directory: %w", err)
 	}
 
 	tmp := path + TempSuffix
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
-		return "", 0, fmt.Errorf("create temp file: %w", err)
+		return "", "", 0, fmt.Errorf("create temp file: %w", err)
 	}
 
 	hasher := sha1.New()
@@ -45,33 +49,32 @@ func writeFileAtomic(path string, r io.Reader, mtime time.Time) (string, int64, 
 	if err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return "", 0, fmt.Errorf("write: %w", err)
+		return "", "", 0, fmt.Errorf("write: %w", err)
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return "", 0, fmt.Errorf("sync: %w", err)
+		return "", "", 0, fmt.Errorf("sync: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
-		return "", 0, err
+		return "", "", 0, err
 	}
+	return tmp, hex.EncodeToString(hasher.Sum(nil)), written, nil
+}
 
-	// Proton stores the modification time in the file's encrypted extended
-	// attribute, so the mirror can preserve it rather than stamping every
-	// file with the download time.
+// commitStaged moves a staged download into place, stamping the modification
+// time Proton recorded for it.
+func commitStaged(tmp, path string, mtime time.Time) error {
 	if !mtime.IsZero() {
-		if err := os.Chtimes(tmp, mtime, mtime); err != nil {
-			// Not worth failing a download over.
-			_ = err
-		}
+		// Not worth failing a download over.
+		_ = os.Chtimes(tmp, mtime, mtime)
 	}
-
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
-		return "", 0, fmt.Errorf("rename into place: %w", err)
+		return fmt.Errorf("rename into place: %w", err)
 	}
-	return hex.EncodeToString(hasher.Sum(nil)), written, nil
+	return nil
 }
 
 // writeStub writes the placeholder for a file that was not downloaded.
