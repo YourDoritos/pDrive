@@ -266,11 +266,25 @@ func (m *Mirror) applyEvents(ctx context.Context, cursor string) (*Result, error
 	// for free.
 	dirsToRelist := map[string]bool{}
 	var deletions []drive.Change
+	var trackedDeletions int
 
 	for _, c := range delta.Changes {
 		switch c.Kind {
 		case ChangeDeleteKind:
 			deletions = append(deletions, c)
+			// Only deletions of nodes this machine actually holds count
+			// toward the guard. A delete event for something never mirrored
+			// here removes nothing.
+			//
+			// Counting them produced impossible arithmetic — "would remove 16
+			// of 5 tracked nodes (320%)" — and, worse, tripped the guard on a
+			// pass that was not going to delete anything, blocking all
+			// syncing until someone passed --confirm-deletions. Another
+			// device clearing out a folder this one never had is exactly the
+			// case that triggers it.
+			if node, lookupErr := m.db.GetNodeByID(c.LinkID); lookupErr == nil && node != nil {
+				trackedDeletions++
+			}
 		default:
 			parent := c.ParentID
 			if parent == "" && c.LinkID != "" {
@@ -290,7 +304,7 @@ func (m *Mirror) applyEvents(ctx context.Context, cursor string) (*Result, error
 		}
 	}
 
-	if err := m.checkDeletionCliff(len(deletions)); err != nil {
+	if err := m.checkDeletionCliff(trackedDeletions); err != nil {
 		return nil, err
 	}
 

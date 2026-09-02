@@ -421,6 +421,12 @@ of delete + re-upload.
    ordinary use, users would learn to bypass it reflexively, and it would protect nothing when
    it mattered. Small accounts are not left exposed: every removal still goes to the local
    trash under guard 4.
+
+   **Only deletions of nodes this machine actually holds are counted.** Counting every
+   delete event produced impossible arithmetic — "would remove 16 of 5 tracked nodes
+   (320%)" — and tripped the guard on a pass that was going to delete nothing, blocking all
+   syncing until someone passed `--confirm-deletions`. Another device clearing a folder this
+   one never had is exactly the case that triggers it.
 2. **Missing root** - root absent, not a directory, or empty while the DB has entries:
    **stop**. An unmounted or renamed folder is not "the user deleted everything."
 3. **Local deletes -> Proton trash.** Never permanent-delete remotely.
@@ -674,10 +680,18 @@ system gate.
 `pdrivectl status` reports which freshness tier is in effect, and `--short` prints one line
 for a status bar.
 
-**Still to verify with a second machine:** "a file added on machine A shows up in the *first*
-`ls` on machine B". Every component is proven separately — the kernel behaviour in Phase 0,
-the event path in Phase 1, and the gate holding a listing while the daemon refreshes here —
-but the end-to-end claim needs two devices.
+**Two-machine convergence: verified.** `test/two-machine.sh` gives each of two simulated
+machines its own XDG tree and sync folder, so each keeps an independent state database and
+event cursor against the same account. It does not copy `session.enc` — two copies of one
+session would race on refresh-token rotation — both symlink the one real session file instead.
+14 assertions, all passing: create, edit, nested folders, rename-as-move, delete, concurrent
+edit with both versions surviving on both machines, convergence, and the account's own files
+left untouched.
+
+The harness immediately earned its keep by finding the deletion-guard counting bug below.
+
+**Still open:** the *timing* claim, "appears in the first `ls`", needs two real devices. The
+data path is proven; only the gate's end-to-end latency across machines is not.
 
 #### Gate design as built
 

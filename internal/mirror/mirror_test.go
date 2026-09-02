@@ -556,3 +556,67 @@ func TestStatsReflectStubsAndContent(t *testing.T) {
 		t.Errorf("material bytes=%d, want 5", st.MaterialBytes)
 	}
 }
+
+// Regression: delete events for nodes this machine never mirrored must not
+// count toward the deletion-cliff guard.
+//
+// Another device clearing a folder this one never had produced "would remove
+// 16 of 5 tracked nodes (320%)" and tripped the guard on a pass that was
+// going to delete nothing — blocking all syncing until someone passed
+// --confirm-deletions.
+func TestUntrackedDeletionsDoNotTripTheGuard(t *testing.T) {
+	f := newFakeDrive()
+	for i := 0; i < 5; i++ {
+		f.addFileWithDigest(fileName(i), "mine")
+	}
+
+	m, _, root := newTestMirror(t, f, nil)
+	mustSync(t, m)
+
+	// A burst of deletions for links this machine has never seen.
+	var changes []drive.Change
+	for i := 0; i < 16; i++ {
+		changes = append(changes, drive.Change{
+			Kind:   drive.ChangeDelete,
+			LinkID: fmt.Sprintf("link:never-mirrored-%d.txt", i),
+		})
+	}
+	f.delta = &drive.Delta{Cursor: "cursor-foreign", Changes: changes}
+
+	res, err := m.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("deletions of untracked nodes tripped the guard: %v", err)
+	}
+	if res.Deleted != 0 {
+		t.Errorf("deleted=%d, want 0 — none of those nodes were here", res.Deleted)
+	}
+	// Everything this machine does hold must be untouched.
+	for i := 0; i < 5; i++ {
+		if _, statErr := os.Stat(filepath.Join(root, fileName(i))); statErr != nil {
+			t.Errorf("%s was removed: %v", fileName(i), statErr)
+		}
+	}
+}
+
+// A genuine mass deletion of tracked nodes must still be stopped.
+func TestTrackedDeletionsStillTripTheGuard(t *testing.T) {
+	f := newFakeDrive()
+	for i := 0; i < 20; i++ {
+		f.addFileWithDigest(fileName(i), "mine")
+	}
+
+	m, _, _ := newTestMirror(t, f, nil)
+	mustSync(t, m)
+
+	var changes []drive.Change
+	for i := 0; i < 20; i++ {
+		changes = append(changes, drive.Change{
+			Kind: drive.ChangeDelete, LinkID: "link:" + fileName(i),
+		})
+	}
+	f.delta = &drive.Delta{Cursor: "cursor-wipe", Changes: changes}
+
+	if _, err := m.Sync(context.Background()); err == nil {
+		t.Fatal("a mass deletion of tracked nodes should still trip the guard")
+	}
+}

@@ -96,6 +96,12 @@ func (m *Mirror) checkDeletionCliff(deletions int) error {
 		return nil
 	}
 
+	if deletions > tracked {
+		// Should be unreachable: callers count only tracked nodes. If it ever
+		// happens the count is wrong, and a wrong count must not be dressed
+		// up as a confident percentage.
+		deletions = tracked
+	}
 	pct := deletions * 100 / tracked
 	if pct < limit {
 		return nil
