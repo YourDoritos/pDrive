@@ -310,3 +310,57 @@ func TestTabNavigationWraps(t *testing.T) {
 		t.Errorf("nextView(login) = %v, want Status", got)
 	}
 }
+
+// The sync indicator must follow the event stream, not the polled status.
+//
+// Polling samples a moment: a 200 ms sync is either missed entirely or, once
+// caught, displayed for the whole poll interval. That mismatch is what made
+// the screen look like it was constantly reloading.
+func TestSyncIndicatorFollowsTheEventStream(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Validate()
+
+	m := NewStatusModel(cfg)
+	m.SetSize(100, 30)
+
+	// A stale poll saying "syncing" must not animate once events are live and
+	// say otherwise.
+	m.SetSyncing(false)
+	m.SetStatus(&ipc.StatusData{State: "syncing"})
+	if !strings.Contains(flatten(m.View()), "up to date") {
+		t.Error("a stale polled state overrode the live event stream")
+	}
+
+	m.SetSyncing(true)
+	if !strings.Contains(flatten(m.View()), "syncing") {
+		t.Error("the event stream said syncing and the screen did not")
+	}
+
+	// With no stream, the polled state is all there is and must be trusted.
+	m2 := NewStatusModel(cfg)
+	m2.SetSize(100, 30)
+	m2.SetStatus(&ipc.StatusData{State: "syncing"})
+	if !strings.Contains(flatten(m2.View()), "syncing") {
+		t.Error("without an event stream, the polled state should be shown")
+	}
+}
+
+// Paused and error states must never be masked by the spinner.
+func TestPausedAndErrorSurviveTheSyncIndicator(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Validate()
+
+	m := NewStatusModel(cfg)
+	m.SetSize(100, 30)
+	m.SetSyncing(true)
+
+	m.SetStatus(&ipc.StatusData{State: "paused"})
+	if !strings.Contains(flatten(m.View()), "paused") {
+		t.Error("paused was hidden behind the sync indicator")
+	}
+
+	m.SetStatus(&ipc.StatusData{State: "error", LastError: "guard stopped this pass"})
+	if !strings.Contains(flatten(m.View()), "guard stopped") {
+		t.Error("an error was hidden behind the sync indicator")
+	}
+}

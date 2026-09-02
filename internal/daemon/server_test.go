@@ -10,6 +10,7 @@ import (
 
 	"github.com/YourDoritos/pdrive/internal/config"
 	"github.com/YourDoritos/pdrive/internal/ipc"
+	"github.com/YourDoritos/pdrive/internal/mirror"
 	"github.com/YourDoritos/pdrive/internal/state"
 )
 
@@ -218,5 +219,57 @@ func TestServeRefusesWhenAlreadyRunning(t *testing.T) {
 	err := other.Serve(context.Background(), socket)
 	if err == nil {
 		t.Fatal("a second daemon bound a socket that was already in use")
+	}
+}
+
+// Regression: the polling cadence keyed off lastSync, which every successful
+// pass updated — including a poll that found nothing. The "recently active"
+// window therefore never expired and the daemon polled at the active interval
+// (5 s) forever, syncing constantly on an idle account.
+func TestPollIntervalDecaysWhenNothingHappens(t *testing.T) {
+	d, _ := newTestDaemon(t)
+
+	// A pass that moved something: fast cadence is correct here.
+	d.finishSync(&mirror.Result{Uploaded: 1}, nil)
+	if got := d.pollInterval(); got != d.cfg.Freshness.ActiveInterval.D() {
+		t.Errorf("after a real change, interval = %v, want the active interval %v",
+			got, d.cfg.Freshness.ActiveInterval.D())
+	}
+
+	// Passes that find nothing must not keep it there.
+	for i := 0; i < 5; i++ {
+		d.finishSync(&mirror.Result{}, nil)
+	}
+
+	d.mu.Lock()
+	// Age the last real change past the activity window.
+	d.lastChange = time.Now().Add(-2 * d.cfg.Freshness.ActiveWindow.D())
+	d.mu.Unlock()
+
+	if got := d.pollInterval(); got != d.cfg.Freshness.IdleInterval.D() {
+		t.Errorf("with no changes for a while, interval = %v, want the idle interval %v",
+			got, d.cfg.Freshness.IdleInterval.D())
+	}
+}
+
+func TestChangedRecognisesRealWork(t *testing.T) {
+	if changed(&mirror.Result{}) {
+		t.Error("an empty result counted as activity")
+	}
+	if changed(&mirror.Result{Skipped: 100, Warnings: 2}) {
+		t.Error("skips and warnings are not activity")
+	}
+	for name, res := range map[string]*mirror.Result{
+		"downloaded": {Downloaded: 1},
+		"uploaded":   {Uploaded: 1},
+		"moved":      {Moved: 1},
+		"trashed":    {TrashedRemote: 1},
+		"deleted":    {Deleted: 1},
+		"stubbed":    {Stubbed: 1},
+		"conflict":   {Conflicts: 1},
+	} {
+		if !changed(res) {
+			t.Errorf("%s did not count as activity", name)
+		}
 	}
 }

@@ -16,11 +16,16 @@ type StatusModel struct {
 	width, height int
 	cfg           *config.Config
 
-	status    *ipc.StatusData
-	daemonUp  bool
-	syncing   bool
-	lastEvent string
-	spinner   int
+	status   *ipc.StatusData
+	daemonUp bool
+	// syncing is driven by the event stream rather than by the polled status.
+	// Polling samples a moment; a sync that takes 200 ms would either be
+	// missed entirely or, once caught, be displayed for the whole poll
+	// interval. Events say exactly when one starts and stops.
+	syncing     bool
+	streamAlive bool
+	lastEvent   string
+	spinner     int
 }
 
 // NewStatusModel builds the status screen.
@@ -35,10 +40,20 @@ func (m *StatusModel) SetSize(w, h int) { m.width, m.height = w, h }
 func (m *StatusModel) SetStatus(s *ipc.StatusData) {
 	m.status = s
 	m.daemonUp = s != nil
-	if s != nil {
+	// Without a live event stream the polled state is all there is.
+	if s != nil && !m.streamAlive {
 		m.syncing = s.State == "syncing"
 	}
 }
+
+// SetSyncing records the real-time sync state from the event stream.
+func (m *StatusModel) SetSyncing(syncing bool) {
+	m.syncing = syncing
+	m.streamAlive = true
+}
+
+// StreamLost falls back to the polled state for the sync indicator.
+func (m *StatusModel) StreamLost() { m.streamAlive = false }
 
 // SetDaemonDown records that the daemon is unreachable.
 func (m *StatusModel) SetDaemonDown() {
@@ -51,6 +66,10 @@ func (m *StatusModel) SetActivity(line string) { m.lastEvent = line }
 
 // Tick advances the spinner.
 func (m *StatusModel) Tick() { m.spinner++ }
+
+// Syncing reports whether a pass is running, so the caller can animate only
+// when there is something to animate.
+func (m StatusModel) Syncing() bool { return m.syncing }
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -68,9 +87,20 @@ func (m StatusModel) View() string {
 		row("Account", StyleValue.Render(orDash(st.Account))),
 		row("Folder", StyleValue.Render(st.Root)),
 		"",
-		row("Files", StyleValue.Render(fmt.Sprintf("%d files, %d folders", st.Files, st.Dirs))),
-		row("Storage", fmt.Sprintf("%s  %s of %s",
-			QuotaBar(st.OnDisk, st.Bytes, 24), humanBytes(st.OnDisk), humanBytes(st.Bytes))),
+		row("Synced", StyleValue.Render(fmt.Sprintf("%d files, %d folders  (%s)",
+			st.Files, st.Dirs, humanBytes(st.OnDisk)))),
+	}
+
+	// Account quota, not the size of the local mirror. Showing "572 KiB of
+	// 572 KiB" under a heading of "Storage" read as a full drive; it was in
+	// fact "everything tracked here is downloaded".
+	if st.QuotaTotal > 0 {
+		pct := float64(st.QuotaUsed) / float64(st.QuotaTotal) * 100
+		rows = append(rows, row("Drive storage", fmt.Sprintf("%s  %s of %s (%.1f%%)",
+			QuotaBar(st.QuotaUsed, st.QuotaTotal, 20),
+			humanBytes(st.QuotaUsed), humanBytes(st.QuotaTotal), pct)))
+	} else {
+		rows = append(rows, row("Drive storage", StyleDim.Render("…")))
 	}
 
 	if st.Stubs > 0 {
@@ -101,10 +131,17 @@ func (m StatusModel) View() string {
 }
 
 func (m StatusModel) renderState(st *ipc.StatusData) string {
-	switch st.State {
-	case "syncing":
+	if m.syncing && st.State != "paused" && st.State != "error" {
 		frame := spinnerFrames[m.spinner%len(spinnerFrames)]
 		return lipgloss.NewStyle().Foreground(ColorAccent).Render(frame + " syncing")
+	}
+	switch st.State {
+	case "syncing":
+		if !m.streamAlive {
+			frame := spinnerFrames[m.spinner%len(spinnerFrames)]
+			return lipgloss.NewStyle().Foreground(ColorAccent).Render(frame + " syncing")
+		}
+		return StyleSuccess.Render("✓ up to date")
 	case "paused":
 		return StyleWarning.Render("‖ paused")
 	case "error":

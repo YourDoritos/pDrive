@@ -58,13 +58,18 @@ type Daemon struct {
 
 	log *Logger
 
-	mu        sync.RWMutex
-	state     State
-	lastSync  time.Time
-	lastError string
-	started   time.Time
-	gate      bool
-	lastPoll  time.Time
+	mu       sync.RWMutex
+	state    State
+	lastSync time.Time
+	// lastChange is the last pass that actually moved something. The polling
+	// cadence keys off this, not off lastSync: every successful poll updates
+	// lastSync, so using it meant the "recently active" window never expired
+	// and the daemon polled at the active interval forever.
+	lastChange time.Time
+	lastError  string
+	started    time.Time
+	gate       bool
+	lastPoll   time.Time
 
 	// syncReq carries sync requests into the single loop that runs them.
 	// Passes are serialised: two reconcilers on one tree would race each
@@ -76,6 +81,12 @@ type Daemon struct {
 
 	// gateConn is the live connection to pdrive-gate, when one exists.
 	gateConn *gate.Conn
+
+	// Account quota, cached. It changes slowly and costs an API call, so it
+	// is refreshed on a long interval rather than on every status request.
+	quotaUsed    int64
+	quotaTotal   int64
+	quotaFetched time.Time
 
 	subs   map[chan *ipc.Event]struct{}
 	subsMu sync.Mutex
@@ -319,6 +330,10 @@ func (d *Daemon) runSync(ctx context.Context, req syncRequest) syncOutcome {
 	d.lastPoll = time.Now()
 	d.mu.Unlock()
 
+	if err == nil {
+		d.refreshQuota(ctx)
+	}
+
 	return d.finishSync(res, err)
 }
 
@@ -331,6 +346,9 @@ func (d *Daemon) finishSync(res *mirror.Result, err error) syncOutcome {
 		d.state = StateIdle
 		d.lastError = ""
 		d.lastSync = time.Now()
+		if res != nil && changed(res) {
+			d.lastChange = d.lastSync
+		}
 	}
 	d.mu.Unlock()
 
@@ -393,13 +411,22 @@ func (d *Daemon) pollLoop(ctx context.Context) {
 // otherwise.
 func (d *Daemon) pollInterval() time.Duration {
 	d.mu.RLock()
-	last := d.lastSync
+	last := d.lastChange
 	d.mu.RUnlock()
 
 	if !last.IsZero() && time.Since(last) < d.cfg.Freshness.ActiveWindow.D() {
 		return d.cfg.Freshness.ActiveInterval.D()
 	}
 	return d.cfg.Freshness.IdleInterval.D()
+}
+
+// changed reports whether a pass actually moved anything. A poll that finds
+// nothing is not activity, and treating it as such keeps the daemon
+// permanently in its fast cadence.
+func changed(res *mirror.Result) bool {
+	return res.Downloaded > 0 || res.Uploaded > 0 || res.Moved > 0 ||
+		res.TrashedRemote > 0 || res.Deleted > 0 || res.Stubbed > 0 ||
+		res.Conflicts > 0
 }
 
 // Fresh reports whether the event cursor was polled recently enough that a
@@ -476,6 +503,10 @@ func (d *Daemon) Status() ipc.StatusData {
 		st.Files, st.Dirs, st.Stubs = stats.Files, stats.Dirs, stats.Stubs
 		st.Bytes, st.OnDisk = stats.Bytes, stats.MaterialBytes
 	}
+
+	d.mu.RLock()
+	st.QuotaUsed, st.QuotaTotal = d.quotaUsed, d.quotaTotal
+	d.mu.RUnlock()
 	if account, err := d.db.GetMeta(state.KeyAccount); err == nil {
 		st.Account = account
 	}
@@ -582,4 +613,37 @@ func activityKind(k mirror.EventKind) string {
 		return "warning"
 	}
 	return "unknown"
+}
+
+// quotaRefreshInterval is how often the account quota is re-read. It moves
+// slowly and costs an API call, so this is deliberately long.
+const quotaRefreshInterval = 5 * time.Minute
+
+// refreshQuota updates the cached account usage.
+//
+// This is what a user means by "storage": how much of their Proton Drive is
+// used. The state database only knows about the bytes this machine mirrors,
+// which is a different and much smaller number.
+func (d *Daemon) refreshQuota(ctx context.Context) {
+	d.mu.RLock()
+	fetched := d.quotaFetched
+	d.mu.RUnlock()
+
+	if !fetched.IsZero() && time.Since(fetched) < quotaRefreshInterval {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	user, err := d.drive.About(ctx)
+	if err != nil {
+		d.log.Debugf("could not refresh account quota: %v", err)
+		return
+	}
+
+	d.mu.Lock()
+	d.quotaUsed, d.quotaTotal = user.UsedSpace, user.MaxSpace
+	d.quotaFetched = time.Now()
+	d.mu.Unlock()
 }

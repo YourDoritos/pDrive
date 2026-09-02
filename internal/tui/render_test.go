@@ -54,15 +54,57 @@ func TestStatusViewShowsQuotaAndState(t *testing.T) {
 		Account: "someone@proton.me",
 		Root:    "/home/someone/pdrive",
 		Files:   12, Dirs: 3,
-		Bytes: 512 * 1024 * 1024 * 1024, OnDisk: 128 * 1024 * 1024 * 1024,
+		Bytes: 70 << 20, OnDisk: 70 << 20,
+		QuotaUsed: 67 << 20, QuotaTotal: 500 << 30,
 		GateActive: true,
 	})
 
 	view := m.View()
-	for _, want := range []string{"someone@proton.me", "128.0 GiB", "512.0 GiB", "12 files", "up to date"} {
+	for _, want := range []string{"someone@proton.me", "12 files", "up to date", "67.0 MiB", "500.0 GiB"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("status view missing %q\n%s", want, view)
 		}
+	}
+}
+
+// Regression: "Storage" showed the size of the local mirror against itself —
+// "572.7 KiB of 572.7 KiB" — which reads as a full drive. What a user means
+// by storage is the Proton account, which was nowhere on the screen.
+func TestStatusShowsAccountQuotaNotMirrorSize(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Validate()
+
+	m := NewStatusModel(cfg)
+	m.SetSize(100, 30)
+	m.SetStatus(&ipc.StatusData{
+		State: "idle",
+		// The mirror is tiny; the account is not.
+		Bytes: 572 << 10, OnDisk: 572 << 10,
+		QuotaUsed: 67 << 20, QuotaTotal: 500 << 30,
+	})
+
+	view := flatten(m.View())
+	if !strings.Contains(view, "67.0 MiB of 500.0 GiB") {
+		t.Errorf("account quota not shown as used-of-total:\n%s", m.View())
+	}
+	// The mirror size must never be presented as a quota.
+	if strings.Contains(view, "572.7 KiB of 572.7 KiB") {
+		t.Error("the local mirror size is still being rendered as storage usage")
+	}
+}
+
+// Until the first quota fetch lands there is nothing to show; it must not
+// fall back to the mirror size.
+func TestStatusHandlesUnknownQuota(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Validate()
+
+	m := NewStatusModel(cfg)
+	m.SetSize(100, 30)
+	m.SetStatus(&ipc.StatusData{State: "idle", Bytes: 1 << 20, OnDisk: 1 << 20})
+
+	if strings.Contains(flatten(m.View()), "1.0 MiB of 1.0 MiB") {
+		t.Error("with no quota known, the mirror size was shown as storage")
 	}
 }
 

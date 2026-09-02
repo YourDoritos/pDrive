@@ -79,14 +79,20 @@ type NotifyOpenParams struct {
 
 // StatusData describes the daemon's current state.
 type StatusData struct {
-	State      string `json:"state"` // idle | syncing | paused | error
-	Account    string `json:"account,omitempty"`
-	Root       string `json:"root"`
-	Files      int    `json:"files"`
-	Dirs       int    `json:"dirs"`
-	Stubs      int    `json:"stubs"`
-	Bytes      int64  `json:"bytes"`
-	OnDisk     int64  `json:"on_disk"`
+	State   string `json:"state"` // idle | syncing | paused | error
+	Account string `json:"account,omitempty"`
+	Root    string `json:"root"`
+	Files   int    `json:"files"`
+	Dirs    int    `json:"dirs"`
+	Stubs   int    `json:"stubs"`
+	// Bytes and OnDisk describe the local mirror: how much this machine
+	// tracks, and how much of it is actually on disk.
+	Bytes  int64 `json:"bytes"`
+	OnDisk int64 `json:"on_disk"`
+	// QuotaUsed and QuotaTotal describe the Proton account itself, which is
+	// what a user means by "storage".
+	QuotaUsed  int64  `json:"quota_used"`
+	QuotaTotal int64  `json:"quota_total"`
 	Conflicts  int    `json:"conflicts"`
 	LastSync   string `json:"last_sync,omitempty"`
 	LastError  string `json:"last_error,omitempty"`

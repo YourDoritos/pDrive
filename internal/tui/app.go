@@ -64,6 +64,7 @@ type (
 		stop   func()
 	}
 	tickMsg         struct{}
+	statusTickMsg   struct{}
 	resumeDoneMsg   struct{ user *api.User }
 	resumeFailedMsg struct{ err error }
 	flashMsg        struct{ text string }
@@ -94,13 +95,29 @@ func NewApp(cfg *config.Config, client *api.Client, store *api.SessionStore, has
 // Init implements tea.Model.
 func (a App) Init() tea.Cmd {
 	if a.resuming {
-		return tea.Batch(a.resumeSession(), tick())
+		return tea.Batch(a.resumeSession(), tick(), statusTick())
 	}
-	return tea.Batch(a.login.Init(), tick())
+	return tea.Batch(a.login.Init(), tick(), statusTick())
 }
 
+// spinnerInterval drives the syncing animation. Local only — it costs
+// nothing beyond a redraw.
+const spinnerInterval = 120 * time.Millisecond
+
+// statusInterval is how often the TUI asks the daemon for status.
+//
+// Deliberately much slower than the spinner. Polling on every animation frame
+// meant two IPC round trips a second and a full repaint each time, which read
+// as the screen flickering. The daemon pushes anything that actually happens
+// over the event stream, so this only has to catch what events do not carry.
+const statusInterval = 3 * time.Second
+
 func tick() tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} })
+	return tea.Tick(spinnerInterval, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
+func statusTick() tea.Cmd {
+	return tea.Tick(statusInterval, func(time.Time) tea.Msg { return statusTickMsg{} })
 }
 
 // resumeSession revalidates a stored session so a dead one drops the user
@@ -239,8 +256,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tickMsg:
-		a.status.Tick()
-		cmds := []tea.Cmd{tick()}
+		// Animate only while something is actually running; a still screen
+		// should not repaint at all.
+		if a.status.Syncing() {
+			a.status.Tick()
+			return a, tick()
+		}
+		return a, tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })
+
+	case statusTickMsg:
+		cmds := []tea.Cmd{statusTick()}
 		if a.authenticated {
 			cmds = append(cmds, fetchStatus())
 		}
@@ -257,6 +282,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Authoritative: the status call itself failed.
 		a.status.SetDaemonDown()
 		a.dropStream()
+		a.status.StreamLost()
 		return a, nil
 
 	case streamEndedMsg:
@@ -264,6 +290,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// decide whether the daemon is actually gone; it will be resubscribed
 		// automatically if it is not.
 		a.dropStream()
+		a.status.StreamLost()
 		return a, nil
 
 	case subscribedMsg:
@@ -272,8 +299,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, waitForEvent(a.events)
 
 	case daemonEvtMsg:
-		a.handleEvent(msg.evt)
-		return a, waitForEvent(a.events)
+		refresh := a.handleEvent(msg.evt)
+		cmds := []tea.Cmd{waitForEvent(a.events)}
+		if refresh {
+			// A finished sync changes the counts; ask now rather than waiting
+			// out the poll interval.
+			cmds = append(cmds, fetchStatus())
+		}
+		return a, tea.Batch(cmds...)
 
 	case conflictsMsg:
 		a.conflicts.SetConflicts(msg.conflicts)
@@ -289,7 +322,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// systemd returns as soon as the unit is started; the daemon still
 		// has to open its Drive session before it can answer.
 		return a, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-			return tickMsg{}
+			return statusTickMsg{}
 		})
 
 	case resumeDoneMsg:
@@ -329,7 +362,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a *App) handleEvent(evt *ipc.Event) {
+// handleEvent applies one daemon event and reports whether the status is now
+// worth re-fetching.
+func (a *App) handleEvent(evt *ipc.Event) bool {
 	switch evt.Type {
 	case ipc.EventActivity:
 		var ad ipc.ActivityData
@@ -339,11 +374,16 @@ func (a *App) handleEvent(evt *ipc.Event) {
 				a.status.SetActivity(ad.Kind + " " + ad.Path)
 			}
 		}
+		return false
 	case ipc.EventSyncStarted:
-		a.status.SetActivity("syncing…")
+		a.status.SetSyncing(true)
+		return false
 	case ipc.EventSyncFinished:
+		a.status.SetSyncing(false)
 		a.status.SetActivity("")
+		return true
 	}
+	return false
 }
 
 func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
