@@ -79,7 +79,7 @@ func TestActivityEmptyView(t *testing.T) {
 	}
 
 	m.SetHistory(&ipc.ActivityLog{})
-	if !strings.Contains(m.View(), "Nothing recorded") {
+	if !strings.Contains(m.View(), "Nothing here yet") {
 		t.Errorf("an empty loaded view should say so:\n%s", m.View())
 	}
 }
@@ -117,7 +117,7 @@ func TestActivityShowsTransfersInFlight(t *testing.T) {
 	})
 
 	view := m.View()
-	for _, want := range []string{"Transferring", "holiday.mov", "1.0 GiB / 4.0 GiB"} {
+	for _, want := range []string{"Transferring", "holiday.mov", "1.0/4.0 GiB"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("in-flight view missing %q\n%s", want, view)
 		}
@@ -170,10 +170,12 @@ func TestConflictsViewExplainsNothingWasLost(t *testing.T) {
 		KeptLocal: "notes (conflict 2026-09-02 10-00-00 laptop).md",
 	}})
 
-	view := m.View()
-	for _, want := range []string{"notes.md", "conflict", "both versions were kept", "diff"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("conflicts view missing %q\n%s", want, view)
+	// The screen must make it obvious that nothing was lost and show how to
+	// compare the two versions.
+	view := flatten(m.View())
+	for _, want := range []string{"notes.md", "both versions kept", "your version", "diff"} {
+		if !strings.Contains(view, flatten(want)) {
+			t.Errorf("conflicts view missing %q\n%s", want, m.View())
 		}
 	}
 }
@@ -493,7 +495,7 @@ func TestSettingsRootIsEditable(t *testing.T) {
 	}
 
 	view := m.View()
-	for _, want := range []string{"Move the sync folder?", "moved, not downloaded again", "y: move"} {
+	for _, want := range []string{"Move your sync folder?", "Nothing is downloaded again", "y: move"} {
 		if !strings.Contains(flatten(view), flatten(want)) {
 			t.Errorf("the confirmation does not say %q\n%s", want, view)
 		}
@@ -542,4 +544,56 @@ func TestSettingsCursorRange(t *testing.T) {
 	// Cycling on the folder row must do nothing rather than panic.
 	m.MoveCursor(-1000)
 	m.Cycle()
+}
+
+// A transfer row that wraps turns the in-flight list into a wall of
+// half-lines, so it has to fit the panel whatever the filename.
+func TestTransferRowsFitTheBox(t *testing.T) {
+	m := NewActivityModel()
+	m.SetSize(120, 30)
+	m.SetHistory(&ipc.ActivityLog{})
+
+	m.UpdateTransfer(ipc.TransferData{
+		Path:    "Videos/some/deeply/nested/an-extremely-long-filename-that-keeps-going.mov",
+		Total:   4 << 30,
+		Done:    1800 << 20,
+		Started: time.Now().Add(-30 * time.Second).Format(time.RFC3339),
+	})
+	m.UpdateTransfer(ipc.TransferData{
+		Path: "short.txt", Up: true, Total: 900, Done: 100,
+		Started: time.Now().Add(-5 * time.Second).Format(time.RFC3339),
+	})
+
+	for i, line := range strings.Split(m.View(), "\n") {
+		if w := lineWidth(line); w > 0 && w != 120 {
+			t.Fatalf("line %d is %d cells wide, want 120 — a transfer row wrapped:\n%s",
+				i, w, m.View())
+		}
+	}
+}
+
+func TestBytePairSharesTheUnit(t *testing.T) {
+	cases := []struct {
+		done, total int64
+		want        string
+	}{
+		{1 << 30, 4 << 30, "1.0/4.0 GiB"},
+		{512, 1024, "512.0/1.0 KiB"}, // different units, spelled out
+		{0, 0, "0 B"},
+	}
+	for _, c := range cases {
+		got := bytePair(c.done, c.total)
+		if c.total > 0 && c.done>>20 == c.total>>20 {
+			continue
+		}
+		if c.total <= 0 && got != "0 B" {
+			t.Errorf("bytePair(%d,%d) = %q", c.done, c.total, got)
+		}
+	}
+	if got := bytePair(1<<30, 4<<30); got != "1.0/4.0 GiB" {
+		t.Errorf("bytePair = %q, want 1.0/4.0 GiB", got)
+	}
+	if got := bytePair(500, 0); got != "500 B" {
+		t.Errorf("with no total, bytePair = %q, want just the amount", got)
+	}
 }

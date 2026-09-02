@@ -70,9 +70,8 @@ func (m ConflictsModel) View() string {
 		body := lipgloss.JoinVertical(lipgloss.Left,
 			StyleSuccess.Render("  No conflicts."),
 			"",
-			StyleDim.Render("  If the same file is ever changed in two places at once,"),
-			StyleDim.Render("  both versions are kept and listed here. Nothing is"),
-			StyleDim.Render("  overwritten and nothing is discarded."),
+			StyleDim.Render("  If you change the same file in two places at once,"),
+			StyleDim.Render("  both versions are kept and listed here."),
 		)
 		body = lipgloss.JoinVertical(lipgloss.Left, body, "",
 			StyleHelp.Render("r: refresh  1-4: tabs  q: quit"))
@@ -80,7 +79,8 @@ func (m ConflictsModel) View() string {
 	}
 
 	header := StyleSubtitle.Render(
-		fmt.Sprintf("%d conflict(s) — both versions were kept", len(m.conflicts)))
+		fmt.Sprintf("%s changed in two places — both versions kept",
+			plural(len(m.conflicts), "file", "files")))
 
 	rows := []string{header, ""}
 	for i, c := range m.conflicts {
@@ -92,7 +92,7 @@ func (m ConflictsModel) View() string {
 		}
 		rows = append(rows, marker+nameStyle.Render(truncate(c.Path, m.pathWidth())))
 		rows = append(rows,
-			StyleDim.Render("      your copy: ")+
+			StyleDim.Render("      your version: ")+
 				StyleDim.Render(truncate(c.KeptLocal, m.pathWidth())))
 		if c.At != "" {
 			rows = append(rows, StyleDim.Render("      "+relTime(c.At)))
@@ -120,11 +120,11 @@ func (m ConflictsModel) explain(c ipc.ConflictEntry) string {
 	kept := filepath.Join(m.root, filepath.FromSlash(c.KeptLocal))
 
 	lines := []string{
-		StyleDim.Render("  The version from Proton Drive is at the original name."),
-		StyleDim.Render("  Your version was renamed beside it and uploaded too, so"),
-		StyleDim.Render("  both exist on every device."),
+		StyleDim.Render("  The file from Proton Drive kept its original name."),
+		StyleDim.Render("  Your version sits next to it under a new name, and"),
+		StyleDim.Render("  is on your other devices too."),
 		"",
-		StyleDim.Render("  Compare them, from inside the sync folder:"),
+		StyleDim.Render("  To compare them:"),
 		StyleValue.Render("    cd " + shortenHome(m.root)),
 		// Split across lines rather than truncated: a conflict name carries a
 		// timestamp and a hostname, and a command the user cannot paste is
@@ -132,13 +132,13 @@ func (m ConflictsModel) explain(c ipc.ConflictEntry) string {
 		StyleValue.Render(fmt.Sprintf("    diff %q \\", c.Path)),
 		StyleValue.Render(fmt.Sprintf("         %q", c.KeptLocal)),
 		"",
-		StyleDim.Render("  Delete the copy you do not want; this entry then clears"),
-		StyleDim.Render("  itself on the next refresh."),
+		StyleDim.Render("  Delete whichever you don't want. This entry then"),
+		StyleDim.Render("  disappears on its own."),
 	}
 
 	if _, err := os.Stat(kept); err != nil {
 		lines = append(lines, "", StyleWarning.Render(
-			"  The preserved copy is no longer on disk; this entry will clear."))
+			"  Your version is gone — this entry will clear itself."))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
@@ -155,4 +155,12 @@ func shortenHome(p string) string {
 
 func (m ConflictsModel) pathWidth() int {
 	return BoxWidth - 20
+}
+
+// plural renders a count with the right noun.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }

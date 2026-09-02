@@ -109,14 +109,14 @@ func (m StatusModel) View() string {
 	}
 	if st.Conflicts > 0 {
 		rows = append(rows, row("Conflicts",
-			StyleError.Render(fmt.Sprintf("%d — press 3", st.Conflicts))))
+			StyleError.Render(fmt.Sprintf("%d — see the Conflicts tab", st.Conflicts))))
 	}
 
 	rows = append(rows,
 		"",
 		row("Freshness", m.renderFreshness(st)),
 		row("Last sync", StyleDim.Render(relTime(st.LastSync))),
-		row("Daemon up", StyleDim.Render(orDash(st.Uptime))),
+		row("Running for", StyleDim.Render(orDash(st.Uptime))),
 	)
 
 	if m.lastEvent != "" {
@@ -153,10 +153,10 @@ func (m StatusModel) renderState(st *ipc.StatusData) string {
 
 func (m StatusModel) renderFreshness(st *ipc.StatusData) string {
 	if st.GateActive {
-		return StyleSuccess.Render("gate active — listings wait until current")
+		return StyleSuccess.Render("instant — folders update as you open them")
 	}
 	if m.cfg != nil && !m.cfg.Freshness.Gate {
-		return StyleDim.Render("polling (gate disabled in settings)")
+		return StyleDim.Render("checks periodically (turned off in settings)")
 	}
 	return StyleWarning.Render("polling — pdrive-gate not running")
 }
@@ -165,11 +165,12 @@ func (m StatusModel) viewDaemonDown() string {
 	rows := []string{
 		row("Status", StyleError.Render("daemon not running")),
 		"",
-		StyleDim.Render("  Nothing is syncing. Your files are untouched either"),
-		StyleDim.Render("  way — pDrive only syncs while the daemon runs."),
+		StyleDim.Render("  Nothing is syncing right now."),
+		StyleDim.Render("  Your files are safe. They just will not change until"),
+		StyleDim.Render("  you start syncing again."),
 		"",
-		StyleSelected.Render("  s") + StyleValue.Render("  start it now"),
-		StyleSelected.Render("  e") + StyleValue.Render("  start it now and at every login"),
+		StyleSelected.Render("  s") + StyleValue.Render("  Start syncing"),
+		StyleSelected.Render("  e") + StyleValue.Render("  Start syncing, and again at every login"),
 	}
 	if m.lastEvent != "" {
 		rows = append(rows, "", StyleError.Render("  "+truncate(m.lastEvent, BoxWidth-6)))

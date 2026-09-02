@@ -51,7 +51,7 @@ type settingRow struct {
 var settingRows = []settingRow{
 	{
 		label: "Size cap",
-		help:  "Files larger than this are not downloaded; a .pdrive-stub marks them.",
+		help:  "Larger files aren't downloaded until you ask for them.",
 		value: func(c *config.Config) string {
 			if c.Sync.MaxAutoDownloadSize <= 0 {
 				return "unlimited"
@@ -65,7 +65,7 @@ var settingRows = []settingRow{
 	},
 	{
 		label: "Deletion guard",
-		help:  "Refuse any pass that would delete more than this share of your files.",
+		help:  "Stop a sync that would delete more of your files than this.",
 		value: func(c *config.Config) string {
 			if c.Sync.DeletionGuardPercent >= 100 {
 				return "off (not recommended)"
@@ -79,7 +79,7 @@ var settingRows = []settingRow{
 	},
 	{
 		label: "Trash retention",
-		help:  "How long files removed remotely are kept in the local trash.",
+		help:  "How long deleted files stay recoverable on this computer.",
 		value: func(c *config.Config) string {
 			return fmt.Sprintf("%d days", c.Sync.TrashRetentionDays)
 		},
@@ -90,7 +90,7 @@ var settingRows = []settingRow{
 	},
 	{
 		label: "Blocking ls",
-		help:  "Hold `ls` until the folder is current. Needs pdrive-gate (root).",
+		help:  "Wait for new files to arrive before listing the folder.",
 		value: func(c *config.Config) string {
 			if c.Freshness.Gate {
 				return "on"
@@ -101,7 +101,7 @@ var settingRows = []settingRow{
 	},
 	{
 		label: "Max hold",
-		help:  "Longest a listing may ever wait. Proton latency must not become disk latency.",
+		help:  "How long a listing may wait. Longer is fresher but slower.",
 		value: func(c *config.Config) string {
 			return fmt.Sprintf("%d ms", c.Freshness.MaxBlockMS)
 		},
@@ -112,7 +112,7 @@ var settingRows = []settingRow{
 	},
 	{
 		label: "Upload limit",
-		help:  "Cap upload bandwidth.",
+		help:  "Limit how fast files are uploaded.",
 		value: func(c *config.Config) string { return kbps(c.Limits.UploadKbps) },
 		cycle: func(c *config.Config) {
 			steps := []int{0, 256, 1024, 4096, 16384}
@@ -121,7 +121,7 @@ var settingRows = []settingRow{
 	},
 	{
 		label: "Download limit",
-		help:  "Cap download bandwidth.",
+		help:  "Limit how fast files are downloaded.",
 		value: func(c *config.Config) string { return kbps(c.Limits.DownloadKbps) },
 		cycle: func(c *config.Config) {
 			steps := []int{0, 256, 1024, 4096, 16384}
@@ -130,7 +130,7 @@ var settingRows = []settingRow{
 	},
 	{
 		label: "Parallel jobs",
-		help:  "Too many gets the account rate-limited by Proton.",
+		help:  "How many files transfer at the same time.",
 		value: func(c *config.Config) string {
 			return fmt.Sprintf("%d", c.Limits.MaxParallelTransfers)
 		},
@@ -269,7 +269,7 @@ func (m *SettingsModel) SetMessage(s string) { m.message = s }
 // View renders the settings screen.
 func (m SettingsModel) View() string {
 	if m.cfg == nil {
-		return StyleDim.Render("  no configuration loaded")
+		return StyleDim.Render("  No settings loaded.")
 	}
 
 	if m.confirming {
@@ -290,25 +290,28 @@ func (m SettingsModel) View() string {
 		rows = append(rows, marker+labelStyle.Render(s.label)+" "+valueStyle.Render(s.value(m.cfg)))
 	}
 
+	// Always the same height, whichever row is selected, or the panel jumps
+	// as the cursor moves.
+	hint := "Where your files are kept. Changing this moves them."
 	switch {
 	case m.editingRoot:
-		rows = append(rows, "", StyleDim.Render(
-			"  Absolute path or ~/… . Your files are moved there, not"))
-		rows = append(rows, StyleDim.Render(
-			"  downloaded again."))
+		hint = "Type a path, or ~/ for your home folder. Your files move there."
 	case m.cursor >= 0 && m.cursor < len(settingRows):
-		rows = append(rows, "", StyleDim.Render("  "+settingRows[m.cursor].help))
-	default:
-		rows = append(rows, "", StyleDim.Render(
-			"  Where your files live. Changing it moves them and restarts"))
-		rows = append(rows, StyleDim.Render("  the daemon."))
+		hint = settingRows[m.cursor].help
+	}
+	rows = append(rows, "")
+	for _, line := range WrapFixed(hint, BoxWidth-8, 2) {
+		rows = append(rows, StyleDim.Render("  "+line))
 	}
 
-	if m.dirty {
-		rows = append(rows, "", StyleWarning.Render("  unsaved changes — press w to write them"))
-	}
-	if m.message != "" {
+	// Also fixed height, so saving or an error does not shift the panel.
+	switch {
+	case m.message != "":
 		rows = append(rows, "", "  "+m.message)
+	case m.dirty:
+		rows = append(rows, "", StyleWarning.Render("  Unsaved — press w to save"))
+	default:
+		rows = append(rows, "", "")
 	}
 
 	help := "↑/↓ j/k: select  enter: change  w: write  q: quit"
@@ -341,17 +344,15 @@ func (m SettingsModel) rootRowView() string {
 // confirmView spells out what a folder move will do before it happens.
 func (m SettingsModel) confirmView() string {
 	return lipgloss.JoinVertical(lipgloss.Left,
-		StyleWarning.Render("  Move the sync folder?"),
+		StyleWarning.Render("  Move your sync folder?"),
 		"",
 		row("From", StyleValue.Render(truncate(m.cfg.SyncRoot(), BoxWidth-22))),
 		row("To", StyleValue.Render(truncate(config.ExpandPath(m.pendingRoot), BoxWidth-22))),
 		"",
-		StyleDim.Render("  Your files are moved, not downloaded again — pDrive"),
-		StyleDim.Render("  tracks them by path relative to this folder, so the"),
-		StyleDim.Render("  sync state stays valid."),
+		StyleDim.Render("  Your files are moved to the new folder. Nothing is"),
+		StyleDim.Render("  downloaded again, and nothing in Proton Drive changes."),
 		"",
-		StyleDim.Render("  The daemon stops during the move and starts again"),
-		StyleDim.Render("  afterwards. Nothing is uploaded or deleted."),
+		StyleDim.Render("  Syncing pauses until the move finishes."),
 		"",
 		StyleHelp.Render("y: move  n/esc: cancel"),
 	)

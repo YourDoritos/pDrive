@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Palette — matches pVPN so the two tools look like one family.
 //
@@ -121,6 +125,38 @@ func CenterBox(width, height int, style lipgloss.Style, content string) string {
 		return box
 	}
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// WrapFixed wraps text to width and pads to exactly lines rows.
+//
+// Fixed height matters for anything that changes with the selection: a hint
+// that is one line for one row and two for the next changes the panel's
+// height, and a centred panel then jumps up and down as the cursor moves.
+func WrapFixed(text string, width, lines int) []string {
+	out := make([]string, 0, lines)
+	current := ""
+
+	for _, word := range strings.Fields(text) {
+		switch {
+		case current == "":
+			current = word
+		case len(current)+1+len(word) <= width:
+			current += " " + word
+		default:
+			out = append(out, current)
+			current = word
+		}
+		if len(out) == lines {
+			break
+		}
+	}
+	if current != "" && len(out) < lines {
+		out = append(out, current)
+	}
+	for len(out) < lines {
+		out = append(out, "")
+	}
+	return out[:lines]
 }
 
 // Disclosure is the notice that must be shown wherever pDrive asks for

@@ -120,7 +120,7 @@ func TestStatusViewWhenDaemonIsDown(t *testing.T) {
 	view := flatten(m.View())
 	// The screen must offer to start the daemon, not print a command for the
 	// user to go and type somewhere else.
-	for _, want := range []string{"daemon not running", "start it now", "s: start"} {
+	for _, want := range []string{"daemon not running", "Start syncing", "s: start"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("daemon-down view missing %q\n%s", want, m.View())
 		}

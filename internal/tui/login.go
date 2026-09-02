@@ -67,14 +67,14 @@ func NewLoginModel(rememberedEmail string) LoginModel {
 	password.Width = 44
 
 	mailbox := textinput.New()
-	mailbox.Placeholder = "mailbox (second) password"
+	mailbox.Placeholder = "second password"
 	mailbox.EchoMode = textinput.EchoPassword
 	mailbox.EchoCharacter = '•'
 	mailbox.CharLimit = 256
 	mailbox.Width = 44
 
 	twofa := textinput.New()
-	twofa.Placeholder = "6-digit code, or a TOTP secret"
+	twofa.Placeholder = "6-digit code"
 	twofa.CharLimit = 64
 	twofa.Width = 44
 
@@ -168,7 +168,7 @@ func (m LoginModel) handleEnter(client *api.Client, store *api.SessionStore) (Lo
 		}
 		m.step = stepWorking
 		m.password.Blur()
-		m.status = "Authenticating…"
+		m.status = "Signing in…"
 		m.err = nil
 		return m, m.doLogin(client, store)
 
@@ -178,7 +178,7 @@ func (m LoginModel) handleEnter(client *api.Client, store *api.SessionStore) (Lo
 		}
 		m.step = stepWorking
 		m.twofa.Blur()
-		m.status = "Verifying second factor…"
+		m.status = "Checking your code…"
 		m.err = nil
 		return m, m.do2FA(client, store)
 
@@ -188,7 +188,7 @@ func (m LoginModel) handleEnter(client *api.Client, store *api.SessionStore) (Lo
 		}
 		m.step = stepWorking
 		m.mailbox.Blur()
-		m.status = "Unlocking keys…"
+		m.status = "Unlocking your files…"
 		m.err = nil
 		return m, m.doVerify(client, store, m.mailbox.Value())
 	}
@@ -294,7 +294,7 @@ func finishVerify(ctx context.Context, client *api.Client, store *api.SessionSto
 // View renders the login screen.
 func (m LoginModel) View() string {
 	title := StyleTitle.Render("pDrive")
-	sub := StyleSubtitle.Render("Proton Drive sync for Linux")
+	sub := StyleSubtitle.Render("Proton Drive for Linux")
 	notice := StyleDisclosure.Render(DisclosureLines[0]) + "\n" +
 		StyleDisclosure.Render(DisclosureLines[1])
 
@@ -307,8 +307,8 @@ func (m LoginModel) View() string {
 			fieldRow("Password", m.password.View())
 	case stepMailbox:
 		field = fieldRow("Email", StyleDim.Render(m.username.Value())) + "\n" +
-			StyleWarning.Render("  Two-password account — the mailbox password unlocks your files.") + "\n" +
-			fieldRow("Mailbox pw", m.mailbox.View())
+			StyleWarning.Render("  This account has a second password. It unlocks your files.") + "\n" +
+			fieldRow("2nd password", m.mailbox.View())
 	case step2FA:
 		field = fieldRow("Email", StyleDim.Render(m.username.Value())) + "\n" +
 			fieldRow("2FA code", m.twofa.View())

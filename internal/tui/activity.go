@@ -43,6 +43,9 @@ func NewActivityModel() ActivityModel {
 func (m *ActivityModel) SetSize(w, h int) { m.width, m.height = w, h }
 
 // SetHistory installs the log fetched from the daemon.
+//
+// Stored oldest-first, rendered newest-first: the most recent thing is what
+// someone opening this screen wants to see, without scrolling.
 func (m *ActivityModel) SetHistory(log *ipc.ActivityLog) {
 	if log == nil {
 		return
@@ -159,20 +162,22 @@ func (m ActivityModel) View() string {
 	case len(m.lines) > 0:
 		title := fmt.Sprintf("History (%d)", len(m.lines))
 		if m.offset > 0 {
-			title += StyleWarning.Render(fmt.Sprintf("   ↑ %d newer", m.offset))
+			title += StyleWarning.Render(fmt.Sprintf("   %d newer above", m.offset))
 		}
 		rows = append(rows, StyleSubtitle.Render(title), "")
-		for _, l := range m.visible() {
-			rows = append(rows, m.renderLine(l))
+		visible := m.visible()
+		// Newest at the top.
+		for i := len(visible) - 1; i >= 0; i-- {
+			rows = append(rows, m.renderLine(visible[i]))
 		}
 	case !m.loaded:
 		rows = append(rows, StyleDim.Render("  Loading…"))
 	default:
 		rows = append(rows,
-			StyleDim.Render("  Nothing recorded yet."),
+			StyleDim.Render("  Nothing here yet."),
 			"",
-			StyleDim.Render("  Transfers, moves, deletions and conflicts are kept"),
-			StyleDim.Render("  by the daemon, so this survives closing pDrive."))
+			StyleDim.Render("  Files you add, change or delete will show up here,"),
+			StyleDim.Render("  on this computer or anywhere else."))
 	}
 
 	rows = append(rows, "",
@@ -206,15 +211,13 @@ func (m ActivityModel) renderTransfers() []string {
 			arrow = lipgloss.NewStyle().Foreground(ColorSecondary).Render("↑")
 		}
 
-		name := truncate(baseName(t.Path), 26)
-		bar := QuotaBar(t.Done, t.Total, 14)
+		// Everything on one line, sized to the panel: a transfer row that
+		// wraps turns the list into a wall of half-lines.
+		name := truncate(baseName(t.Path), 21)
+		bar := QuotaBar(t.Done, t.Total, 10)
 
-		amount := humanBytes(t.Done)
-		if t.Total > 0 {
-			amount = fmt.Sprintf("%s / %s", humanBytes(t.Done), humanBytes(t.Total))
-		}
-
-		line := fmt.Sprintf("  %s %-26s %s  %s", arrow, name, bar, StyleDim.Render(amount))
+		line := fmt.Sprintf("  %s %-21s %s  %s",
+			arrow, name, bar, StyleDim.Render(bytePair(t.Done, t.Total)))
 		if rate := transferRate(t); rate != "" {
 			line += StyleDim.Render("  " + rate)
 		}
@@ -238,6 +241,32 @@ func transferRate(t *ipc.TransferData) string {
 		return ""
 	}
 	return humanBytes(int64(float64(t.Done)/elapsed)) + "/s"
+}
+
+// bytePair renders progress compactly, sharing the unit when both sides use
+// it: "1.8/4.0 GiB" rather than "1.8 GiB / 4.0 GiB".
+func bytePair(done, total int64) string {
+	if total <= 0 {
+		return humanBytes(done)
+	}
+	d, du := scaleBytes(done)
+	tt, tu := scaleBytes(total)
+	if du == tu {
+		return fmt.Sprintf("%.1f/%.1f %s", d, tt, tu)
+	}
+	return fmt.Sprintf("%s/%s", humanBytes(done), humanBytes(total))
+}
+
+func scaleBytes(n int64) (float64, string) {
+	const unit = 1024
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB"}
+	v := float64(n)
+	i := 0
+	for v >= unit && i < len(units)-1 {
+		v /= unit
+		i++
+	}
+	return v, units[i]
 }
 
 func baseName(p string) string {

@@ -684,8 +684,13 @@ func (a App) View() string {
 	}
 
 	if a.resuming {
-		return "\n" + StyleBox.Render(
-			StyleTitle.Render("pDrive")+"\n\n"+StyleDim.Render("Resuming session…")) + "\n"
+		// Centred like every other screen; it was the one panel still pinned
+		// to the top-left.
+		return CenterBox(a.width, a.height, StyleBox, lipgloss.JoinVertical(lipgloss.Left,
+			StyleTitle.Render("  pDrive"),
+			"",
+			StyleDim.Render("  Signing in…"),
+		))
 	}
 
 	var content string
