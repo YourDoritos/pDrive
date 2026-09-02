@@ -309,12 +309,12 @@ func (m SettingsModel) View() string {
 	case m.message != "":
 		rows = append(rows, "", "  "+m.message)
 	case m.dirty:
-		rows = append(rows, "", StyleWarning.Render("  Unsaved — press w to save"))
+		rows = append(rows, "", StyleWarning.Render("  Unsaved — press s to save"))
 	default:
 		rows = append(rows, "", "")
 	}
 
-	help := "↑/↓ j/k: select  enter: change  w: write  q: quit"
+	help := "↑/↓ j/k: select  enter: change  s: save  q: quit"
 	if m.editingRoot {
 		help = "enter: continue  esc: cancel"
 	}

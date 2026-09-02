@@ -114,7 +114,7 @@ func (m StatusModel) View() string {
 
 	rows = append(rows,
 		"",
-		row("Freshness", m.renderFreshness(st)),
+		row("New files", m.renderFreshness(st)),
 		row("Last sync", StyleDim.Render(relTime(st.LastSync))),
 		row("Running for", StyleDim.Render(orDash(st.Uptime))),
 	)
@@ -151,14 +151,24 @@ func (m StatusModel) renderState(st *ipc.StatusData) string {
 	}
 }
 
+// renderFreshness says how quickly a change made somewhere else shows up in
+// this folder.
+//
+// This is the one number the whole design exists to improve, so it is stated
+// as what the user sees rather than which component happens to be running.
 func (m StatusModel) renderFreshness(st *ipc.StatusData) string {
 	if st.GateActive {
-		return StyleSuccess.Render("instant — folders update as you open them")
+		return StyleSuccess.Render("as soon as you open the folder")
+	}
+
+	every := "every minute"
+	if m.cfg != nil {
+		every = "every " + friendlyEvery(m.cfg.Freshness.IdleInterval.D())
 	}
 	if m.cfg != nil && !m.cfg.Freshness.Gate {
-		return StyleDim.Render("checks periodically (turned off in settings)")
+		return StyleDim.Render("checked " + every + " (turned off in settings)")
 	}
-	return StyleWarning.Render("polling — pdrive-gate not running")
+	return StyleWarning.Render("checked " + every)
 }
 
 func (m StatusModel) viewDaemonDown() string {
@@ -245,4 +255,21 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// friendlyEvery renders an interval the way a person says it, rather than the
+// way Go prints it ("1m0s").
+func friendlyEvery(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%d seconds", int(d.Seconds()))
+	case d < 2*time.Minute:
+		return "minute"
+	case d < time.Hour:
+		return fmt.Sprintf("%d minutes", int(d.Minutes()))
+	case d < 2*time.Hour:
+		return "hour"
+	default:
+		return fmt.Sprintf("%d hours", int(d.Hours()))
+	}
 }

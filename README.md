@@ -90,10 +90,11 @@ pdrive backup             separate verified archive of the whole account
 
 ### Keys
 
-`1`–`4` switch tabs, `←`/`→` cycle them, `esc` returns to Status. `s` syncs
-now, `p` pauses, `r` refreshes, `q` quits. If the daemon is not running,
-Status offers `s` to start it and `e` to start it and enable it at login —
-no need to leave the TUI.
+`1`–`4` switch tabs, `←`/`→` cycle them, `esc` returns to Status. `p` pauses,
+`r` refreshes, `q` quits.
+
+`s` is contextual: sync now on most tabs, **save** on Settings, and **start the
+daemon** on Status when it is not running (`e` also enables it at login).
 
 ## Safety
 

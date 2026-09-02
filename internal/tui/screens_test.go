@@ -597,3 +597,52 @@ func TestBytePairSharesTheUnit(t *testing.T) {
 		t.Errorf("with no total, bytePair = %q, want just the amount", got)
 	}
 }
+
+// The row exists to answer "how soon will I see a change made elsewhere?", so
+// it must say that rather than naming a component.
+func TestFreshnessRowSaysWhatTheUserGets(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Validate()
+
+	m := NewStatusModel(cfg)
+	m.SetSize(100, 30)
+
+	m.SetStatus(&ipc.StatusData{State: "idle", GateActive: true})
+	if !strings.Contains(flatten(m.View()), "as soon as you open the folder") {
+		t.Errorf("with the gate running the row does not say so:\n%s", m.View())
+	}
+
+	m.SetStatus(&ipc.StatusData{State: "idle", GateActive: false})
+	view := flatten(m.View())
+	if !strings.Contains(view, "checked every") {
+		t.Errorf("without the gate the row does not give an interval:\n%s", m.View())
+	}
+	// Jargon must not leak into it.
+	for _, jargon := range []string{"gate active", "polling", "fanotify", "pdrive-gate"} {
+		if strings.Contains(view, jargon) {
+			t.Errorf("the row still says %q", jargon)
+		}
+	}
+}
+
+func TestFriendlyEvery(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "30 seconds"},
+		{time.Minute, "minute"},
+		{5 * time.Minute, "5 minutes"},
+		{time.Hour, "hour"},
+		{3 * time.Hour, "3 hours"},
+	}
+	for _, c := range cases {
+		if got := friendlyEvery(c.d); got != c.want {
+			t.Errorf("friendlyEvery(%v) = %q, want %q", c.d, got, c.want)
+		}
+	}
+	// Never the Go default formatting.
+	if strings.Contains(friendlyEvery(time.Minute), "0s") {
+		t.Error("friendlyEvery leaked Go's duration format")
+	}
+}

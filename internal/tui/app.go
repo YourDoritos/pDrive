@@ -573,6 +573,14 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "s":
+		// Contextual: on Settings the obvious meaning of s is "save", and
+		// that is where the key is wanted. Sync-now stays on every other tab.
+		if a.view == ViewSettings {
+			if err := a.settings.Save(); err != nil {
+				return a, nil
+			}
+			return a, reloadDaemon()
+		}
 		if a.status.DaemonDown() {
 			a.status.SetActivity("starting pdrived…")
 			return a, startDaemon()
@@ -637,6 +645,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "w":
+		// Kept as an alias: w was the original binding.
 		if a.view == ViewSettings {
 			if err := a.settings.Save(); err != nil {
 				return a, nil
