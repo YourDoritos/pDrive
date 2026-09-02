@@ -80,9 +80,12 @@ var (
 	StyleHelp = lipgloss.NewStyle().
 			Foreground(ColorFgDim)
 
+	// LabelWidth is the key column. A label longer than this wraps onto a
+	// second line and breaks the table, so callers must stay inside it —
+	// see TestSettingLabelsFitTheColumn.
 	StyleLabel = lipgloss.NewStyle().
 			Foreground(ColorFgDim).
-			Width(16)
+			Width(LabelWidth)
 
 	StyleValue = lipgloss.NewStyle().
 			Foreground(ColorFg)
@@ -101,9 +104,37 @@ var (
 			Italic(true)
 )
 
+// LabelWidth is the width of the key column in every key/value table.
+const LabelWidth = 16
+
+// BoxWidth is the fixed width of every screen's panel.
+//
+// Fixed rather than proportional so the layout does not jump as you switch
+// tabs, and so a very wide terminal does not stretch a key/value table across
+// half a metre of screen.
+const BoxWidth = 72
+
+// CenterBox renders content in a fixed-width panel, centred in the terminal.
+func CenterBox(width, height int, style lipgloss.Style, content string) string {
+	box := style.Width(BoxWidth).Render(content)
+	if width <= 0 || height <= 0 {
+		return box
+	}
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
 // Disclosure is the notice that must be shown wherever pDrive asks for
-// account credentials.
+// account credentials. Required by the Proton Drive integration rules.
 const Disclosure = "This is a third-party application not officially supported by Proton."
+
+// DisclosureLines is the same notice, pre-wrapped to fit the panel.
+//
+// Wrapped explicitly rather than left to the renderer so the break lands
+// between clauses instead of wherever the width happens to fall.
+var DisclosureLines = []string{
+	"This is a third-party application",
+	"not officially supported by Proton.",
+}
 
 // QuotaBar renders a proportional usage bar.
 func QuotaBar(used, max int64, width int) string {

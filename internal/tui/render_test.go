@@ -24,7 +24,9 @@ func TestLoginViewAlwaysShowsDisclosure(t *testing.T) {
 		m := NewLoginModel("")
 		m.step = step
 		m.SetSize(100, 30)
-		if !strings.Contains(m.View(), Disclosure) {
+		// Whitespace-insensitive: the notice is wrapped to fit the panel, and
+		// the requirement is that it is shown, not that it is on one line.
+		if !strings.Contains(flatten(m.View()), flatten(Disclosure)) {
 			t.Errorf("login step %q does not show the third-party disclosure", name)
 		}
 	}
@@ -73,14 +75,19 @@ func TestStatusViewWhenDaemonIsDown(t *testing.T) {
 	m.SetSize(100, 30)
 	m.SetDaemonDown()
 
-	view := m.View()
-	for _, want := range []string{"daemon not running", "systemctl --user"} {
+	view := flatten(m.View())
+	// The screen must offer to start the daemon, not print a command for the
+	// user to go and type somewhere else.
+	for _, want := range []string{"daemon not running", "start it now", "s: start"} {
 		if !strings.Contains(view, want) {
-			t.Errorf("daemon-down view missing %q\n%s", want, view)
+			t.Errorf("daemon-down view missing %q\n%s", want, m.View())
 		}
 	}
 	if strings.Contains(view, "up to date") {
 		t.Error("a stopped daemon must never render as up to date")
+	}
+	if !m.DaemonDown() {
+		t.Error("DaemonDown() should be true after SetDaemonDown()")
 	}
 }
 
@@ -166,4 +173,32 @@ func stripANSI(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// flatten reduces rendered output to bare words: styling escapes are removed,
+// box-drawing characters dropped, and runs of whitespace collapsed.
+//
+// Needed because a sentence wrapped inside a bordered panel is interrupted by
+// a border and a colour reset between its lines, so a plain substring match
+// would fail on text that is plainly visible on screen.
+func flatten(s string) string {
+	var b strings.Builder
+	inEscape := false
+
+	for _, r := range s {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+		case inEscape:
+			// SGR and other CSI sequences end with an alphabetic byte.
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		case r == '│' || r == '─' || r == '╭' || r == '╮' || r == '╰' || r == '╯':
+			b.WriteRune(' ')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
 }

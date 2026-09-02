@@ -67,6 +67,8 @@ type (
 	resumeDoneMsg   struct{ user *api.User }
 	resumeFailedMsg struct{ err error }
 	flashMsg        struct{ text string }
+	// daemonStartedMsg follows a successful `systemctl --user start`.
+	daemonStartedMsg struct{}
 )
 
 // NewApp builds the root model.
@@ -274,6 +276,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.status.SetActivity(msg.text)
 		return a, nil
 
+	case daemonStartedMsg:
+		a.status.SetActivity("")
+		// systemd returns as soon as the unit is started; the daemon still
+		// has to open its Drive session before it can answer.
+		return a, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+			return tickMsg{}
+		})
+
 	case resumeDoneMsg:
 		a.resuming = false
 		a.authenticated = true
@@ -354,6 +364,18 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Quit
 
+	case "esc":
+		a.view = ViewStatus
+		return a, fetchStatus()
+
+	case "left", "h":
+		a.view = prevView(a.view)
+		return a, a.onTabChange()
+
+	case "right":
+		a.view = nextView(a.view)
+		return a, a.onTabChange()
+
 	case "1":
 		a.view = ViewStatus
 		return a, fetchStatus()
@@ -368,8 +390,19 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "s":
+		if a.status.DaemonDown() {
+			a.status.SetActivity("starting pdrived…")
+			return a, startDaemon()
+		}
 		a.status.SetActivity("syncing…")
 		return a, runSync()
+
+	case "e":
+		if a.status.DaemonDown() {
+			a.status.SetActivity("enabling pdrived…")
+			return a, enableDaemon()
+		}
+		return a, nil
 
 	case "p":
 		paused := a.status.status != nil && a.status.status.State == "paused"
@@ -533,4 +566,36 @@ func (a App) renderNav() string {
 	bar := lipgloss.JoinHorizontal(lipgloss.Center, parts...)
 	return lipgloss.NewStyle().Width(a.width).Render(
 		lipgloss.JoinHorizontal(lipgloss.Center, brand, "  ", bar))
+}
+
+// tabOrder is the left-to-right order of the tabs.
+var tabOrder = []View{ViewStatus, ViewActivity, ViewConflicts, ViewSettings}
+
+func nextView(v View) View {
+	for i, t := range tabOrder {
+		if t == v {
+			return tabOrder[(i+1)%len(tabOrder)]
+		}
+	}
+	return ViewStatus
+}
+
+func prevView(v View) View {
+	for i, t := range tabOrder {
+		if t == v {
+			return tabOrder[(i-1+len(tabOrder))%len(tabOrder)]
+		}
+	}
+	return ViewStatus
+}
+
+// onTabChange refreshes whatever the newly shown tab displays.
+func (a App) onTabChange() tea.Cmd {
+	switch a.view {
+	case ViewConflicts:
+		return fetchConflicts()
+	case ViewStatus:
+		return fetchStatus()
+	}
+	return nil
 }

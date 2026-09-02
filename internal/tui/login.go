@@ -8,7 +8,6 @@ import (
 	"github.com/YourDoritos/pdrive/internal/api"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/pquerna/otp/totp"
 )
 
@@ -296,7 +295,8 @@ func finishVerify(ctx context.Context, client *api.Client, store *api.SessionSto
 func (m LoginModel) View() string {
 	title := StyleTitle.Render("pDrive")
 	sub := StyleSubtitle.Render("Proton Drive sync for Linux")
-	notice := StyleDisclosure.Render(Disclosure)
+	notice := StyleDisclosure.Render(DisclosureLines[0]) + "\n" +
+		StyleDisclosure.Render(DisclosureLines[1])
 
 	var field string
 	switch m.step {
@@ -322,10 +322,10 @@ func (m LoginModel) View() string {
 		body += "\n\n" + StyleError.Render("  "+m.err.Error())
 	}
 
-	help := StyleHelp.Render("enter: continue   tab: switch field   esc: clear error   ctrl+c: quit")
-	box := StyleActiveBox.Render(body)
+	body += "\n\n" + StyleHelp.Render(
+		"enter: continue  tab: switch field  esc: clear  ctrl+c: quit")
 
-	return lipgloss.JoinVertical(lipgloss.Left, "", box, "", help)
+	return CenterBox(m.width, m.height, StyleActiveBox, body)
 }
 
 func fieldRow(label, value string) string {

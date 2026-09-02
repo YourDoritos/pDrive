@@ -85,12 +85,12 @@ func (m ActivityModel) View() string {
 		body := lipgloss.JoinVertical(lipgloss.Left,
 			StyleDim.Render("  Nothing yet."),
 			"",
-			StyleDim.Render("  Transfers, moves, deletions and conflicts appear here as"),
-			StyleDim.Render("  they happen. Drop a file into the folder to see one."),
+			StyleDim.Render("  Transfers, moves, deletions and conflicts appear"),
+			StyleDim.Render("  here as they happen."),
+			"",
+			StyleHelp.Render("s: sync  c: clear  1-4: tabs  q: quit"),
 		)
-		return lipgloss.JoinVertical(lipgloss.Left, "",
-			StyleBox.Render(body), "",
-			StyleHelp.Render("s: sync now   c: clear   q: quit"))
+		return CenterBox(m.width, m.height, StyleBox, body)
 	}
 
 	rows := m.visible()
@@ -104,12 +104,12 @@ func (m ActivityModel) View() string {
 		title += StyleWarning.Render(fmt.Sprintf("  ↑ %d newer", m.offset))
 	}
 
-	body := lipgloss.JoinVertical(lipgloss.Left,
-		append([]string{StyleSubtitle.Render(title), ""}, rendered...)...)
+	all := append([]string{StyleSubtitle.Render(title), ""}, rendered...)
+	all = append(all, "",
+		StyleHelp.Render("↑/↓ j/k: scroll  s: sync  c: clear  q: quit"))
 
-	return lipgloss.JoinVertical(lipgloss.Left, "",
-		StyleActiveBox.Render(body), "",
-		StyleHelp.Render("↑/↓: scroll   s: sync now   c: clear   q: quit"))
+	return CenterBox(m.width, m.height,
+		StyleActiveBox, lipgloss.JoinVertical(lipgloss.Left, all...))
 }
 
 // visible returns the slice of lines that fits the window.
@@ -146,14 +146,9 @@ func (m ActivityModel) renderLine(l activityLine) string {
 }
 
 func (m ActivityModel) pathWidth() int {
-	w := m.width - 34
-	if w < 20 {
-		return 20
-	}
-	if w > 70 {
-		return 70
-	}
-	return w
+	// The panel is a fixed width, so this follows it rather than the
+	// terminal: timestamp, label, padding and size take the rest.
+	return BoxWidth - 34
 }
 
 // activityLabel maps an event kind to a short label and a colour, so a glance

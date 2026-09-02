@@ -74,9 +74,9 @@ func (m ConflictsModel) View() string {
 			StyleDim.Render("  both versions are kept and listed here. Nothing is"),
 			StyleDim.Render("  overwritten and nothing is discarded."),
 		)
-		return lipgloss.JoinVertical(lipgloss.Left, "",
-			StyleBox.Render(body), "",
-			StyleHelp.Render("r: refresh   q: quit"))
+		body = lipgloss.JoinVertical(lipgloss.Left, body, "",
+			StyleHelp.Render("r: refresh  1-4: tabs  q: quit"))
+		return CenterBox(m.width, m.height, StyleBox, body)
 	}
 
 	header := StyleSubtitle.Render(
@@ -104,10 +104,9 @@ func (m ConflictsModel) View() string {
 		rows = append(rows, m.explain(*sel))
 	}
 
-	body := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	return lipgloss.JoinVertical(lipgloss.Left, "",
-		StyleActiveBox.Render(body), "",
-		StyleHelp.Render("↑/↓: select   r: refresh   q: quit"))
+	rows = append(rows, "", StyleHelp.Render("↑/↓ j/k: select  r: refresh  q: quit"))
+	return CenterBox(m.width, m.height,
+		StyleActiveBox, lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
 
 // explain says, for the selected conflict, what is where.
@@ -155,12 +154,5 @@ func shortenHome(p string) string {
 }
 
 func (m ConflictsModel) pathWidth() int {
-	w := m.width - 20
-	if w < 24 {
-		return 24
-	}
-	if w > 76 {
-		return 76
-	}
-	return w
+	return BoxWidth - 20
 }

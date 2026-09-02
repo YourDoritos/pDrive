@@ -218,3 +218,95 @@ func TestSettingsView(t *testing.T) {
 		}
 	}
 }
+
+// A label longer than the key column wraps onto a second line and breaks the
+// table, which is easy to introduce and easy to miss.
+func TestSettingLabelsFitTheColumn(t *testing.T) {
+	for _, row := range settingRows {
+		if n := len([]rune(row.label)); n > LabelWidth-1 {
+			t.Errorf("setting label %q is %d runes; the column fits %d",
+				row.label, n, LabelWidth-1)
+		}
+	}
+}
+
+// Every panel must fit its fixed width, or the box borders tear.
+func TestScreensFitTheBoxWidth(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Validate()
+
+	st := NewStatusModel(cfg)
+	st.SetSize(120, 30)
+	st.SetStatus(&ipc.StatusData{
+		State: "idle", Account: "a-fairly-long-address@proton.me",
+		Root:  "/home/someone/a/deeply/nested/sync/folder",
+		Files: 999999, Dirs: 9999, Stubs: 42, Conflicts: 7,
+		Bytes: 5 << 40, OnDisk: 3 << 40, GateActive: true, Uptime: "120h3m",
+	})
+
+	se := NewSettingsModel(cfg)
+	se.SetSize(120, 30)
+
+	cf := NewConflictsModel("/home/someone/pdrive")
+	cf.SetSize(120, 30)
+	cf.SetConflicts([]ipc.ConflictEntry{{
+		Path:      "Documents/some/deep/path/report.pdf",
+		KeptLocal: "Documents/some/deep/path/report (conflict 2026-09-02 10-00-00 workstation).pdf",
+	}})
+
+	for name, view := range map[string]string{
+		"status":    st.View(),
+		"settings":  se.View(),
+		"conflicts": cf.View(),
+	} {
+		for i, line := range strings.Split(view, "\n") {
+			if w := lineWidth(line); w > 0 && w != 120 {
+				t.Errorf("%s line %d is %d cells wide, want the full 120 "+
+					"(a torn box means content overflowed BoxWidth)", name, i, w)
+				break
+			}
+		}
+	}
+}
+
+// lineWidth counts visible cells, ignoring styling escapes.
+func lineWidth(s string) int {
+	n, inEscape := 0, false
+	for _, r := range s {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+		case inEscape:
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		default:
+			n++
+		}
+	}
+	return n
+}
+
+// Tab navigation must wrap in both directions, so the arrow keys never dead-end.
+func TestTabNavigationWraps(t *testing.T) {
+	if got := nextView(ViewSettings); got != ViewStatus {
+		t.Errorf("next after the last tab = %v, want Status", got)
+	}
+	if got := prevView(ViewStatus); got != ViewSettings {
+		t.Errorf("previous before the first tab = %v, want Settings", got)
+	}
+
+	// A full cycle forward must visit every tab and come home.
+	v := ViewStatus
+	for range tabOrder {
+		v = nextView(v)
+	}
+	if v != ViewStatus {
+		t.Errorf("a full cycle ended on %v, want Status", v)
+	}
+
+	// The login view is not a tab; navigating from it must not hang.
+	if got := nextView(ViewLogin); got != ViewStatus {
+		t.Errorf("nextView(login) = %v, want Status", got)
+	}
+}

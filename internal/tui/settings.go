@@ -113,7 +113,7 @@ var settingRows = []settingRow{
 		},
 	},
 	{
-		label: "Parallel transfers",
+		label: "Parallel jobs",
 		help:  "Too many gets the account rate-limited by Proton.",
 		value: func(c *config.Config) string {
 			return fmt.Sprintf("%d", c.Limits.MaxParallelTransfers)
@@ -183,7 +183,7 @@ func (m SettingsModel) View() string {
 
 	rows := []string{
 		row("Sync folder", StyleValue.Render(m.cfg.SyncRoot())),
-		StyleDim.Render("                   changing this needs a daemon restart; edit config.toml"),
+		StyleDim.Render("                   restart the daemon to change this"),
 		"",
 	}
 
@@ -209,10 +209,10 @@ func (m SettingsModel) View() string {
 		rows = append(rows, "", "  "+m.message)
 	}
 
-	body := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	return lipgloss.JoinVertical(lipgloss.Left, "",
-		StyleActiveBox.Render(body), "",
-		StyleHelp.Render("↑/↓: select   enter/space: change   w: write   q: quit"))
+	rows = append(rows, "",
+		StyleHelp.Render("↑/↓ j/k: select  enter: change  w: write  q: quit"))
+	return CenterBox(m.width, m.height,
+		StyleActiveBox, lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
 
 func kbps(v int) string {

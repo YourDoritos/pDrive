@@ -87,6 +87,13 @@ pdrivectl get <path>      download a file left as a stub by the size cap
 pdrive backup             separate verified archive of the whole account
 ```
 
+### Keys
+
+`1`–`4` switch tabs, `←`/`→` cycle them, `esc` returns to Status. `s` syncs
+now, `p` pauses, `r` refreshes, `q` quits. If the daemon is not running,
+Status offers `s` to start it and `e` to start it and enable it at login —
+no need to leave the TUI.
+
 ## Safety
 
 A sync client's real job is not moving files, it is not losing them.

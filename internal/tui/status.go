@@ -93,10 +93,11 @@ func (m StatusModel) View() string {
 		rows = append(rows, "", row("Latest", StyleDim.Render(truncate(m.lastEvent, m.contentWidth()-20))))
 	}
 
-	body := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	help := StyleHelp.Render("s: sync now   p: pause/resume   r: refresh   q: quit")
+	rows = append(rows, "",
+		StyleHelp.Render("s: sync  p: pause/resume  r: refresh  1-4: tabs  q: quit"))
 
-	return lipgloss.JoinVertical(lipgloss.Left, "", StyleActiveBox.Render(body), "", help)
+	return CenterBox(m.width, m.height,
+		StyleActiveBox, lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
 
 func (m StatusModel) renderState(st *ipc.StatusData) string {
@@ -124,19 +125,26 @@ func (m StatusModel) renderFreshness(st *ipc.StatusData) string {
 }
 
 func (m StatusModel) viewDaemonDown() string {
-	body := lipgloss.JoinVertical(lipgloss.Left,
+	rows := []string{
 		row("Status", StyleError.Render("daemon not running")),
 		"",
-		StyleDim.Render("  Nothing is syncing. Start the daemon with:"),
+		StyleDim.Render("  Nothing is syncing. Your files are untouched either"),
+		StyleDim.Render("  way — pDrive only syncs while the daemon runs."),
 		"",
-		StyleValue.Render("    systemctl --user enable --now pdrived"),
-		"",
-		StyleDim.Render("  Your files are untouched either way — pdrive only"),
-		StyleDim.Render("  syncs while the daemon is running."),
-	)
-	help := StyleHelp.Render("r: retry   q: quit")
-	return lipgloss.JoinVertical(lipgloss.Left, "", StyleBox.Render(body), "", help)
+		StyleSelected.Render("  s") + StyleValue.Render("  start it now"),
+		StyleSelected.Render("  e") + StyleValue.Render("  start it now and at every login"),
+	}
+	if m.lastEvent != "" {
+		rows = append(rows, "", StyleError.Render("  "+truncate(m.lastEvent, BoxWidth-6)))
+	}
+	rows = append(rows, "", StyleHelp.Render("s: start  e: enable  r: retry  q: quit"))
+
+	return CenterBox(m.width, m.height, StyleBox, lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
+
+// DaemonDown reports whether the daemon is unreachable, so the root model
+// knows which meaning to give the s key.
+func (m StatusModel) DaemonDown() bool { return !m.daemonUp }
 
 func (m StatusModel) contentWidth() int {
 	if m.width < 40 {
