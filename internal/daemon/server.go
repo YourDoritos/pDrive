@@ -75,8 +75,17 @@ func removeStaleSocket(path string) error {
 }
 
 func (d *Daemon) handleConn(ctx context.Context, raw net.Conn) {
-	defer raw.Close()
 	conn := ipc.NewConn(raw)
+
+	// A handler may take the connection over — subscribe turns it into a
+	// long-lived event stream. Closing it here would kill that stream the
+	// instant it was created, so ownership passes with it.
+	hijacked := false
+	defer func() {
+		if !hijacked {
+			raw.Close()
+		}
+	}()
 
 	for {
 		req, err := conn.ReadRequest()
@@ -85,7 +94,8 @@ func (d *Daemon) handleConn(ctx context.Context, raw net.Conn) {
 		}
 		resp := d.dispatch(ctx, conn, req)
 		if resp == nil {
-			return // handler took over the connection
+			hijacked = true
+			return
 		}
 		if err := conn.SendResponse(resp); err != nil {
 			return
@@ -171,7 +181,12 @@ func resultToData(res *mirror.Result) ipc.SyncData {
 }
 
 // streamEvents pushes daemon events down one connection until it closes.
+//
+// It owns the connection: handleConn hands ownership over rather than closing
+// it, so this is the only place that may.
 func (d *Daemon) streamEvents(ctx context.Context, conn *ipc.Conn) {
+	defer conn.Close()
+
 	events, unsubscribe := d.Subscribe()
 	defer unsubscribe()
 

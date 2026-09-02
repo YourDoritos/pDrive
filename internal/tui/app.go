@@ -69,6 +69,10 @@ type (
 	flashMsg        struct{ text string }
 	// daemonStartedMsg follows a successful `systemctl --user start`.
 	daemonStartedMsg struct{}
+	// streamEndedMsg means the event stream closed. That is NOT evidence the
+	// daemon is gone — only a failed status call is. Conflating the two made
+	// a healthy daemon render as "not running".
+	streamEndedMsg struct{}
 )
 
 // NewApp builds the root model.
@@ -167,7 +171,7 @@ func waitForEvent(ch <-chan *ipc.Event) tea.Cmd {
 	return func() tea.Msg {
 		evt, ok := <-ch
 		if !ok {
-			return daemonDownMsg{}
+			return streamEndedMsg{}
 		}
 		return daemonEvtMsg{evt: evt}
 	}
@@ -250,12 +254,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case daemonDownMsg:
+		// Authoritative: the status call itself failed.
 		a.status.SetDaemonDown()
-		if a.stopSubs != nil {
-			a.stopSubs()
-			a.stopSubs = nil
-		}
-		a.events = nil
+		a.dropStream()
+		return a, nil
+
+	case streamEndedMsg:
+		// Only the stream went away. Drop it and let the next status poll
+		// decide whether the daemon is actually gone; it will be resubscribed
+		// automatically if it is not.
+		a.dropStream()
 		return a, nil
 
 	case subscribedMsg:
@@ -598,4 +606,13 @@ func (a App) onTabChange() tea.Cmd {
 		return fetchStatus()
 	}
 	return nil
+}
+
+// dropStream tears down the event subscription without judging the daemon.
+func (a *App) dropStream() {
+	if a.stopSubs != nil {
+		a.stopSubs()
+		a.stopSubs = nil
+	}
+	a.events = nil
 }

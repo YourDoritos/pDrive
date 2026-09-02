@@ -82,6 +82,7 @@ pdrive                    terminal UI: status, activity, conflicts, settings
 pdrivectl status --short  one line, for waybar or tmux
 pdrivectl sync            run a pass now and wait for it
 pdrivectl pause / resume  stop and restart automatic syncing
+pdrivectl watch           follow sync activity as it happens
 pdrivectl conflicts       list preserved local copies
 pdrivectl get <path>      download a file left as a stub by the size cap
 pdrive backup             separate verified archive of the whole account

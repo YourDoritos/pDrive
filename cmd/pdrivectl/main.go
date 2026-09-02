@@ -12,6 +12,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/YourDoritos/pdrive/internal/config"
@@ -38,6 +40,8 @@ func main() {
 		err = simple(func(c *ipc.Client) error { return c.Pause() }, "syncing paused")
 	case "resume":
 		err = simple(func(c *ipc.Client) error { return c.Resume() }, "syncing resumed")
+	case "watch":
+		err = cmdWatch(args)
 	case "conflicts":
 		err = cmdConflicts(args)
 	case "get":
@@ -68,6 +72,7 @@ usage:
   pdrivectl sync [--full|--down-only] run a pass now and wait for it
   pdrivectl pause                     stop automatic syncing
   pdrivectl resume                    restart automatic syncing
+  pdrivectl watch                     follow sync activity as it happens
   pdrivectl conflicts                 list preserved local copies
   pdrivectl get <path>                download a file left as a stub
 
@@ -199,6 +204,81 @@ func cmdSync(args []string) error {
 		fmt.Printf("%d warning(s) — see the log\n", res.Warnings)
 	}
 	return nil
+}
+
+// cmdWatch follows the daemon's event stream, like tail -f for sync activity.
+func cmdWatch(args []string) error {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	// Confirm the daemon is up first, so "nothing happening" is never
+	// confused with "not connected".
+	c, err := connect()
+	if err != nil {
+		return err
+	}
+	st, err := c.Status()
+	c.Close()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("watching %s (daemon %s) — ctrl+c to stop\n\n", st.Root, st.State)
+
+	events, stop, err := ipc.Subscribe(config.SocketPath())
+	if err != nil {
+		return err
+	}
+	defer stop()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+
+	for {
+		select {
+		case <-sig:
+			return nil
+		case evt, ok := <-events:
+			if !ok {
+				return fmt.Errorf("the daemon closed the event stream")
+			}
+			printEvent(evt)
+		}
+	}
+}
+
+func printEvent(evt *ipc.Event) {
+	stamp := time.Now().Format("15:04:05")
+
+	switch evt.Type {
+	case ipc.EventSyncStarted:
+		fmt.Printf("%s  sync started\n", stamp)
+	case ipc.EventSyncFinished:
+		var d ipc.SyncData
+		if err := json.Unmarshal(evt.Data, &d); err != nil {
+			return
+		}
+		if d.Downloaded == 0 && d.Uploaded == 0 && d.Moved == 0 &&
+			d.TrashedRemote == 0 && d.Deleted == 0 && d.Conflicts == 0 {
+			return // nothing happened; not worth a line
+		}
+		fmt.Printf("%s  sync finished: %d down, %d up, %d moved, %d trashed, %d conflicts\n",
+			stamp, d.Downloaded, d.Uploaded, d.Moved, d.TrashedRemote, d.Conflicts)
+	case ipc.EventActivity:
+		var a ipc.ActivityData
+		if err := json.Unmarshal(evt.Data, &a); err != nil {
+			return
+		}
+		if a.Kind == "skip" {
+			return
+		}
+		line := fmt.Sprintf("%s  %-12s %s", stamp, a.Kind, a.Path)
+		if a.Size > 0 {
+			line += "  " + humanBytes(a.Size)
+		}
+		fmt.Println(line)
+	}
 }
 
 func cmdConflicts(args []string) error {
