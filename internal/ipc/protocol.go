@@ -28,6 +28,10 @@ const (
 	// CmdReload re-reads config.toml, so settings changed in the TUI take
 	// effect without restarting the daemon.
 	CmdReload = "reload"
+	// CmdActivity returns the recorded history and anything in flight.
+	CmdActivity = "activity"
+	// CmdClearActivity empties the recorded history.
+	CmdClearActivity = "clear-activity"
 )
 
 // Request is a command from a client to the daemon.
@@ -54,6 +58,8 @@ const (
 	EventSyncStarted  = "sync-started"
 	EventSyncFinished = "sync-finished"
 	EventActivity     = "activity"
+	// EventTransfer reports a transfer starting, progressing or finishing.
+	EventTransfer = "transfer"
 )
 
 // --- parameters ---
@@ -128,11 +134,39 @@ type ConflictsData struct {
 	Conflicts []ConflictEntry `json:"conflicts"`
 }
 
-// ActivityData is a line of progress.
+// ActivityData is one completed change.
 type ActivityData struct {
 	Kind string `json:"kind"`
 	Path string `json:"path"`
 	Size int64  `json:"size,omitempty"`
+	// At is when it happened, as RFC3339. Empty on live events, which are
+	// happening now by definition.
+	At string `json:"at,omitempty"`
+}
+
+// TransferData describes a transfer in flight.
+type TransferData struct {
+	Path string `json:"path"`
+	// Up is true for an upload.
+	Up bool `json:"up"`
+	// Done and Total are bytes. Total is 0 when the size is unknown.
+	Done  int64 `json:"done"`
+	Total int64 `json:"total"`
+	// Finished marks the closing event for a transfer.
+	Finished bool `json:"finished,omitempty"`
+	// Started is when it began, as RFC3339, for rate calculation.
+	Started string `json:"started,omitempty"`
+}
+
+// ActivityLog is the recorded history plus anything currently moving.
+type ActivityLog struct {
+	Entries   []ActivityData `json:"entries"`
+	Transfers []TransferData `json:"transfers,omitempty"`
+}
+
+// ActivityParams limits how much history is returned.
+type ActivityParams struct {
+	Limit int `json:"limit,omitempty"`
 }
 
 // --- wire helpers ---

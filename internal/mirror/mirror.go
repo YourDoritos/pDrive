@@ -10,6 +10,7 @@ package mirror
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -50,6 +51,13 @@ const (
 	// EventConflict reports that both sides changed and both versions were
 	// kept.
 	EventConflict
+	// EventTransferStart announces a transfer that is about to begin, so a
+	// large file is visible while it moves rather than only once it lands.
+	EventTransferStart
+	// EventTransferProgress reports how far a transfer has got.
+	EventTransferProgress
+	// EventTransferDone closes out a transfer, successfully or not.
+	EventTransferDone
 )
 
 // Event is a progress notification.
@@ -58,6 +66,11 @@ type Event struct {
 	Path string
 	Size int64
 	Err  error
+
+	// Up distinguishes an upload from a download, for transfer events.
+	Up bool
+	// Done is the bytes moved so far, for transfer events.
+	Done int64
 }
 
 // Result summarises a pass.
@@ -453,9 +466,12 @@ func (m *Mirror) applyNode(ctx context.Context, n drive.Node) error {
 	}
 	defer rc.Close()
 
+	src := m.trackTransfer(n.Path, n.Size, false, rc)
+	defer m.endTransfer(n.Path, false)
+
 	// Stage first. Holding both versions at once turns conflict detection
 	// into an exact hash comparison instead of an inference from metadata.
-	tmp, sum, written, err := stageDownload(local, rc)
+	tmp, sum, written, err := stageDownload(local, src)
 	if err != nil {
 		return err
 	}
@@ -566,7 +582,9 @@ func (m *Mirror) Materialize(ctx context.Context, path string) error {
 	}
 	defer rc.Close()
 
-	tmp, sum, written, err := stageDownload(local, rc)
+	src := m.trackTransfer(path, node.Size, false, rc)
+	tmp, sum, written, err := stageDownload(local, src)
+	m.endTransfer(path, false)
 	if err != nil {
 		return err
 	}
@@ -680,4 +698,21 @@ func validPath(p string) bool {
 		}
 	}
 	return true
+}
+
+// trackTransfer announces a transfer and wraps its reader so progress is
+// reported while the bytes move.
+func (m *Mirror) trackTransfer(path string, size int64, up bool, r io.Reader) io.Reader {
+	m.emit(Event{Kind: EventTransferStart, Path: path, Size: size, Up: up})
+	return newProgressReader(r, size, func(done, total int64) {
+		m.emit(Event{
+			Kind: EventTransferProgress, Path: path,
+			Size: total, Done: done, Up: up,
+		})
+	})
+}
+
+// endTransfer closes out a transfer so a viewer stops showing it in flight.
+func (m *Mirror) endTransfer(path string, up bool) {
+	m.emit(Event{Kind: EventTransferDone, Path: path, Up: up})
 }

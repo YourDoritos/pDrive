@@ -138,6 +138,23 @@ func (d *Daemon) dispatch(ctx context.Context, conn *ipc.Conn, req *ipc.Request)
 		}
 		return ipc.OK(nil)
 
+	case ipc.CmdActivity:
+		var p ipc.ActivityParams
+		if len(req.Params) > 0 {
+			_ = json.Unmarshal(req.Params, &p)
+		}
+		log, err := d.Activity(p.Limit)
+		if err != nil {
+			return ipc.Errorf("%v", err)
+		}
+		return ipc.OK(log)
+
+	case ipc.CmdClearActivity:
+		if err := d.ClearActivity(); err != nil {
+			return ipc.Errorf("%v", err)
+		}
+		return ipc.OK(nil)
+
 	case ipc.CmdPause:
 		d.Pause()
 		return ipc.OK(nil)

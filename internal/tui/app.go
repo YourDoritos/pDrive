@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/YourDoritos/pdrive/internal/api"
@@ -58,6 +60,7 @@ type (
 	statusMsg     struct{ status *ipc.StatusData }
 	daemonDownMsg struct{}
 	conflictsMsg  struct{ conflicts []ipc.ConflictEntry }
+	activityMsg   struct{ log *ipc.ActivityLog }
 	daemonEvtMsg  struct{ evt *ipc.Event }
 	subscribedMsg struct {
 		events <-chan *ipc.Event
@@ -73,7 +76,9 @@ type (
 	// streamEndedMsg means the event stream closed. That is NOT evidence the
 	// daemon is gone — only a failed status call is. Conflating the two made
 	// a healthy daemon render as "not running".
-	streamEndedMsg struct{}
+	streamEndedMsg     struct{}
+	activityClearedMsg struct{}
+	rootMovedMsg       struct{ root string }
 )
 
 // NewApp builds the root model.
@@ -150,6 +155,39 @@ func fetchStatus() tea.Cmd {
 			return daemonDownMsg{}
 		}
 		return statusMsg{status: st}
+	}
+}
+
+// fetchActivity loads the daemon's stored history. The daemon owns it, so it
+// survives the TUI being closed and reopened.
+func fetchActivity() tea.Cmd {
+	return func() tea.Msg {
+		c, err := ipc.Dial(config.SocketPath())
+		if err != nil {
+			return daemonDownMsg{}
+		}
+		defer c.Close()
+
+		log, err := c.Activity(0)
+		if err != nil {
+			return daemonDownMsg{}
+		}
+		return activityMsg{log: log}
+	}
+}
+
+func clearActivity() tea.Cmd {
+	return func() tea.Msg {
+		c, err := ipc.Dial(config.SocketPath())
+		if err != nil {
+			return flashMsg{text: "daemon not running"}
+		}
+		defer c.Close()
+
+		if err := c.ClearActivity(); err != nil {
+			return flashMsg{text: err.Error()}
+		}
+		return activityClearedMsg{}
 	}
 }
 
@@ -232,6 +270,48 @@ func togglePause(paused bool) tea.Cmd {
 	}
 }
 
+// moveSyncRoot stops the daemon, moves the folder, saves the new path, and
+// starts the daemon again.
+//
+// The daemon must not be watching during the move: a tree that vanishes under
+// it looks exactly like the user deleting everything, and the next pass would
+// propagate that to the account.
+func moveSyncRoot(oldRoot, newRoot string, cfg *config.Config) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		wasRunning := ipc.Available(config.SocketPath())
+		if wasRunning {
+			if out, err := exec.CommandContext(ctx,
+				"systemctl", "--user", "stop", "pdrived").CombinedOutput(); err != nil {
+				return flashMsg{text: "could not stop the daemon: " + firstLine(strings.TrimSpace(string(out)))}
+			}
+		}
+
+		restart := func() {
+			if wasRunning {
+				_ = exec.CommandContext(ctx, "systemctl", "--user", "start", "pdrived").Run()
+			}
+		}
+
+		if err := config.MigrateSyncRoot(oldRoot, config.ExpandPath(newRoot)); err != nil {
+			restart() // the move failed; put things back as they were
+			return flashMsg{text: err.Error()}
+		}
+
+		cfg.Sync.Root = newRoot
+		cfg.Validate()
+		if err := cfg.Save(); err != nil {
+			restart()
+			return flashMsg{text: "moved, but could not save the setting: " + err.Error()}
+		}
+
+		restart()
+		return rootMovedMsg{root: newRoot}
+	}
+}
+
 func reloadDaemon() tea.Cmd {
 	return func() tea.Msg {
 		c, err := ipc.Dial(config.SocketPath())
@@ -302,15 +382,35 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		refresh := a.handleEvent(msg.evt)
 		cmds := []tea.Cmd{waitForEvent(a.events)}
 		if refresh {
-			// A finished sync changes the counts; ask now rather than waiting
-			// out the poll interval.
+			// A finished sync changes both the counts and the log; ask now
+			// rather than waiting out the poll interval.
 			cmds = append(cmds, fetchStatus())
+			if a.view == ViewActivity {
+				cmds = append(cmds, fetchActivity())
+			}
 		}
 		return a, tea.Batch(cmds...)
 
 	case conflictsMsg:
 		a.conflicts.SetConflicts(msg.conflicts)
 		return a, nil
+
+	case activityMsg:
+		a.activity.SetHistory(msg.log)
+		return a, nil
+
+	case activityClearedMsg:
+		a.activity.Clear()
+		return a, fetchActivity()
+
+	case rootMovedMsg:
+		a.conflicts = NewConflictsModel(a.cfg.SyncRoot())
+		a.conflicts.SetSize(a.width, a.height-navHeight)
+		a.settings.SetMessage(StyleSuccess.Render("moved to " + msg.root))
+		// The daemon needs a moment to come back before it can answer.
+		return a, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return statusTickMsg{}
+		})
 
 	case flashMsg:
 		a.settings.SetMessage(StyleDim.Render(msg.text))
@@ -329,7 +429,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.resuming = false
 		a.authenticated = true
 		a.view = ViewStatus
-		return a, tea.Batch(fetchStatus(), fetchConflicts())
+		return a, tea.Batch(fetchStatus(), fetchConflicts(), fetchActivity())
 
 	case resumeFailedMsg:
 		a.resuming = false
@@ -348,7 +448,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.cfg.Reload()
 		a.cfg.Account.Email = a.client.LoginEmail()
 		_ = a.cfg.Save()
-		return a, tea.Batch(fetchStatus(), fetchConflicts())
+		return a, tea.Batch(fetchStatus(), fetchConflicts(), fetchActivity())
 
 	case tea.KeyMsg:
 		return a.handleKey(msg)
@@ -378,6 +478,12 @@ func (a *App) handleEvent(evt *ipc.Event) bool {
 	case ipc.EventSyncStarted:
 		a.status.SetSyncing(true)
 		return false
+	case ipc.EventTransfer:
+		var t ipc.TransferData
+		if err := json.Unmarshal(evt.Data, &t); err == nil {
+			a.activity.UpdateTransfer(t)
+		}
+		return false
 	case ipc.EventSyncFinished:
 		a.status.SetSyncing(false)
 		a.status.SetActivity("")
@@ -402,6 +508,35 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.login, cmd = a.login.Update(msg, a.client, a.store)
 		return a, cmd
+	}
+
+	// The sync folder is typed, so the same rule applies: a path may contain
+	// any of the shortcut letters.
+	if a.view == ViewSettings && a.settings.EditingRoot() {
+		switch msg.String() {
+		case "enter":
+			a.settings.SubmitRoot()
+			return a, nil
+		case "esc":
+			a.settings.CancelEditRoot()
+			return a, nil
+		}
+		return a, a.settings.UpdateInput(msg)
+	}
+
+	// Moving the folder is destructive enough to deserve an explicit yes.
+	if a.view == ViewSettings && a.settings.Confirming() {
+		switch msg.String() {
+		case "y":
+			oldRoot := a.cfg.SyncRoot()
+			newRoot := a.settings.ConfirmRoot()
+			a.settings.SetMessage(StyleDim.Render("moving files…"))
+			return a, moveSyncRoot(oldRoot, newRoot, a.cfg)
+		case "n", "esc":
+			a.settings.CancelEditRoot()
+			return a, nil
+		}
+		return a, nil
 	}
 
 	switch msg.String() {
@@ -429,7 +564,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, fetchStatus()
 	case "2":
 		a.view = ViewActivity
-		return a, nil
+		return a, fetchActivity()
 	case "3":
 		a.view = ViewConflicts
 		return a, fetchConflicts()
@@ -466,7 +601,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "c":
 		if a.view == ViewActivity {
-			a.activity.Clear()
+			return a, clearActivity()
 		}
 		return a, nil
 
@@ -494,6 +629,9 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "enter", " ":
 		if a.view == ViewSettings {
+			if a.settings.OnRootRow() {
+				return a, a.settings.BeginEditRoot()
+			}
 			a.settings.Cycle()
 		}
 		return a, nil
@@ -642,6 +780,8 @@ func (a App) onTabChange() tea.Cmd {
 	switch a.view {
 	case ViewConflicts:
 		return fetchConflicts()
+	case ViewActivity:
+		return fetchActivity()
 	case ViewStatus:
 		return fetchStatus()
 	}

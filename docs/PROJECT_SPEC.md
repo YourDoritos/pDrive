@@ -719,6 +719,39 @@ likely to have just changed.
 `FAN_PRE_ACCESS` placeholders remain Phase 5. The gate marks the whole tree at registration
 and on rescan; a very large tree would be better served by marking lazily.
 
+### Activity and transfers
+
+The activity log lives in the **state database**, not in the TUI. A log held in
+the UI is empty every time the UI opens, which is precisely when someone wants
+to know what happened while they were not watching. It is capped at
+`MaxActivityRows` and pruned after each pass; `skip` events (a file already
+correct) are never stored, since on a steady tree they are the overwhelming
+majority and would push everything meaningful out.
+
+Transfers report themselves while they move. `progressReader` wraps the single
+`io.Copy` that every transfer funnels through and emits at most one event per
+250 ms, so a 4 GiB file is visible throughout instead of producing silence and
+then one line. Uploads and downloads of the same path are tracked separately,
+because a conflict legitimately does both at once.
+
+### Changing the sync folder
+
+The folder is editable in the TUI. The state database stores paths **relative**
+to the root, so moving the tree keeps every baseline entry valid — content
+hashes, revisions and inodes all still describe the same files. Nothing is
+re-downloaded, which matters when the folder is hundreds of gigabytes.
+
+The daemon is stopped for the move. A tree that vanishes underneath it looks
+exactly like the user deleting everything, and the next pass would propagate
+that to the account.
+
+Refused destinations: a relative path, `/`, the home directory itself, a
+folder nested either way with the current one, a regular file, and any folder
+that already contains files — merging into someone else's data would make it
+indistinguishable from synced content and upload all of it. Same-filesystem
+moves are a single atomic rename; across filesystems it copies, verifies every
+file's size, and only then removes the original.
+
 ### Phase 4 - Polish & ship
 Bandwidth limits, parallel transfers, selective sync, `.pdriveignore`. Conflict browser +
 activity log in the TUI, desktop notifications. Log rotation, `pdrivectl doctor`. PKGBUILD,

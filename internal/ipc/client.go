@@ -83,6 +83,18 @@ func (c *Client) Sync(p SyncParams) (*SyncData, error) {
 // Reload asks the daemon to re-read its configuration.
 func (c *Client) Reload() error { return c.call(CmdReload, nil, nil) }
 
+// Activity returns the recorded history and anything in flight.
+func (c *Client) Activity(limit int) (*ActivityLog, error) {
+	var out ActivityLog
+	if err := c.call(CmdActivity, ActivityParams{Limit: limit}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearActivity empties the recorded history.
+func (c *Client) ClearActivity() error { return c.call(CmdClearActivity, nil, nil) }
+
 // Pause stops automatic syncing.
 func (c *Client) Pause() error { return c.call(CmdPause, nil, nil) }
 

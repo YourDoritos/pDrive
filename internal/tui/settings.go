@@ -2,8 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/YourDoritos/pdrive/internal/config"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -19,7 +22,20 @@ type SettingsModel struct {
 	cursor        int
 	message       string
 	dirty         bool
+
+	// The sync folder is a path, not one of a handful of choices, so it is
+	// the one setting that takes free text. Changing it moves the existing
+	// files rather than re-downloading them, so it is guarded by an explicit
+	// confirmation.
+	editingRoot bool
+	rootInput   textinput.Model
+	confirming  bool
+	pendingRoot string
 }
+
+// rootRow is the index of the sync folder, which sits above the cycling
+// settings and behaves differently.
+const rootRow = -1
 
 type settingRow struct {
 	label string
@@ -127,26 +143,101 @@ var settingRows = []settingRow{
 
 // NewSettingsModel builds the settings screen.
 func NewSettingsModel(cfg *config.Config) SettingsModel {
-	return SettingsModel{cfg: cfg}
+	input := textinput.New()
+	input.Placeholder = "~/pdrive"
+	input.CharLimit = 512
+	input.Width = 44
+
+	return SettingsModel{cfg: cfg, cursor: rootRow, rootInput: input}
+}
+
+// EditingRoot reports whether the folder field has focus, so the root model
+// knows to route keystrokes here instead of treating them as shortcuts.
+func (m SettingsModel) EditingRoot() bool { return m.editingRoot }
+
+// Confirming reports whether a folder move is awaiting confirmation.
+func (m SettingsModel) Confirming() bool { return m.confirming }
+
+// PendingRoot returns the folder the user asked to move to.
+func (m SettingsModel) PendingRoot() string { return m.pendingRoot }
+
+// UpdateInput forwards a keystroke to the folder field.
+func (m *SettingsModel) UpdateInput(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	m.rootInput, cmd = m.rootInput.Update(msg)
+	return cmd
+}
+
+// BeginEditRoot focuses the folder field.
+func (m *SettingsModel) BeginEditRoot() tea.Cmd {
+	m.editingRoot = true
+	m.message = ""
+	m.rootInput.SetValue(m.cfg.Sync.Root)
+	m.rootInput.CursorEnd()
+	m.rootInput.Focus()
+	return textinput.Blink
+}
+
+// CancelEditRoot abandons the edit.
+func (m *SettingsModel) CancelEditRoot() {
+	m.editingRoot = false
+	m.confirming = false
+	m.pendingRoot = ""
+	m.rootInput.Blur()
+}
+
+// SubmitRoot validates the typed folder and asks for confirmation.
+func (m *SettingsModel) SubmitRoot() {
+	candidate := strings.TrimSpace(m.rootInput.Value())
+	if candidate == "" {
+		m.CancelEditRoot()
+		return
+	}
+
+	expanded := config.ExpandPath(candidate)
+	if err := config.ValidateSyncRoot(m.cfg.SyncRoot(), expanded); err != nil {
+		m.message = StyleError.Render(err.Error())
+		return
+	}
+
+	m.editingRoot = false
+	m.rootInput.Blur()
+	m.confirming = true
+	m.pendingRoot = candidate
+}
+
+// ConfirmRoot accepts the pending move and records the new folder.
+func (m *SettingsModel) ConfirmRoot() string {
+	pending := m.pendingRoot
+	m.confirming = false
+	m.pendingRoot = ""
+	if pending != "" {
+		m.cfg.Sync.Root = pending
+	}
+	return pending
 }
 
 // SetSize records the terminal dimensions.
 func (m *SettingsModel) SetSize(w, h int) { m.width, m.height = w, h }
 
-// MoveCursor moves the selection.
+// MoveCursor moves the selection. The folder sits one above the first
+// cycling setting.
 func (m *SettingsModel) MoveCursor(delta int) {
 	m.cursor += delta
-	if m.cursor < 0 {
-		m.cursor = 0
+	if m.cursor < rootRow {
+		m.cursor = rootRow
 	}
 	if m.cursor >= len(settingRows) {
 		m.cursor = len(settingRows) - 1
 	}
 }
 
+// OnRootRow reports whether the folder is selected.
+func (m SettingsModel) OnRootRow() bool { return m.cursor == rootRow }
+
 // Cycle advances the selected setting to its next value.
 func (m *SettingsModel) Cycle() {
-	if m.cfg == nil || m.cursor >= len(settingRows) {
+	if m.cfg == nil || m.cursor < 0 || m.cursor >= len(settingRows) {
 		return
 	}
 	settingRows[m.cursor].cycle(m.cfg)
@@ -181,11 +272,11 @@ func (m SettingsModel) View() string {
 		return StyleDim.Render("  no configuration loaded")
 	}
 
-	rows := []string{
-		row("Sync folder", StyleValue.Render(m.cfg.SyncRoot())),
-		StyleDim.Render("                   restart the daemon to change this"),
-		"",
+	if m.confirming {
+		return CenterBox(m.width, m.height, StyleActiveBox, m.confirmView())
 	}
+
+	rows := []string{m.rootRowView(), ""}
 
 	for i, s := range settingRows {
 		marker := "  "
@@ -199,9 +290,20 @@ func (m SettingsModel) View() string {
 		rows = append(rows, marker+labelStyle.Render(s.label)+" "+valueStyle.Render(s.value(m.cfg)))
 	}
 
-	if m.cursor < len(settingRows) {
+	switch {
+	case m.editingRoot:
+		rows = append(rows, "", StyleDim.Render(
+			"  Absolute path or ~/… . Your files are moved there, not"))
+		rows = append(rows, StyleDim.Render(
+			"  downloaded again."))
+	case m.cursor >= 0 && m.cursor < len(settingRows):
 		rows = append(rows, "", StyleDim.Render("  "+settingRows[m.cursor].help))
+	default:
+		rows = append(rows, "", StyleDim.Render(
+			"  Where your files live. Changing it moves them and restarts"))
+		rows = append(rows, StyleDim.Render("  the daemon."))
 	}
+
 	if m.dirty {
 		rows = append(rows, "", StyleWarning.Render("  unsaved changes — press w to write them"))
 	}
@@ -209,10 +311,50 @@ func (m SettingsModel) View() string {
 		rows = append(rows, "", "  "+m.message)
 	}
 
-	rows = append(rows, "",
-		StyleHelp.Render("↑/↓ j/k: select  enter: change  w: write  q: quit"))
+	help := "↑/↓ j/k: select  enter: change  w: write  q: quit"
+	if m.editingRoot {
+		help = "enter: continue  esc: cancel"
+	}
+	rows = append(rows, "", StyleHelp.Render(help))
+
 	return CenterBox(m.width, m.height,
 		StyleActiveBox, lipgloss.JoinVertical(lipgloss.Left, rows...))
+}
+
+func (m SettingsModel) rootRowView() string {
+	if m.editingRoot {
+		return StyleSelected.Render("▸ ") +
+			StyleLabel.Foreground(ColorAccent).Render("Sync folder") + " " +
+			m.rootInput.View()
+	}
+
+	marker, labelStyle, valueStyle := "  ", StyleLabel, StyleValue
+	if m.cursor == rootRow {
+		marker = StyleSelected.Render("▸ ")
+		labelStyle = StyleLabel.Foreground(ColorAccent)
+		valueStyle = StyleSelected
+	}
+	return marker + labelStyle.Render("Sync folder") + " " +
+		valueStyle.Render(truncate(m.cfg.SyncRoot(), BoxWidth-22))
+}
+
+// confirmView spells out what a folder move will do before it happens.
+func (m SettingsModel) confirmView() string {
+	return lipgloss.JoinVertical(lipgloss.Left,
+		StyleWarning.Render("  Move the sync folder?"),
+		"",
+		row("From", StyleValue.Render(truncate(m.cfg.SyncRoot(), BoxWidth-22))),
+		row("To", StyleValue.Render(truncate(config.ExpandPath(m.pendingRoot), BoxWidth-22))),
+		"",
+		StyleDim.Render("  Your files are moved, not downloaded again — pDrive"),
+		StyleDim.Render("  tracks them by path relative to this folder, so the"),
+		StyleDim.Render("  sync state stays valid."),
+		"",
+		StyleDim.Render("  The daemon stops during the move and starts again"),
+		StyleDim.Render("  afterwards. Nothing is uploaded or deleted."),
+		"",
+		StyleHelp.Render("y: move  n/esc: cancel"),
+	)
 }
 
 func kbps(v int) string {

@@ -126,6 +126,15 @@ CREATE TABLE IF NOT EXISTS pending (
   updated_at   INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS activity (
+  id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  at    INTEGER NOT NULL,
+  kind  TEXT NOT NULL,
+  path  TEXT NOT NULL,
+  size  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS activity_by_at ON activity(at);
+
 CREATE TABLE IF NOT EXISTS conflicts (
   path            TEXT NOT NULL,
   kept_local      TEXT NOT NULL,
@@ -448,6 +457,86 @@ func (s *DB) DeleteConflict(path, keptLocal string) error {
 		path, keptLocal)
 	if err != nil {
 		return fmt.Errorf("delete conflict for %q: %w", path, err)
+	}
+	return nil
+}
+
+// ActivityEntry is one recorded transfer or change.
+type ActivityEntry struct {
+	At   time.Time
+	Kind string
+	Path string
+	Size int64
+}
+
+// MaxActivityRows caps the stored history.
+//
+// The log lives in the database rather than in the TUI because the daemon is
+// the long-lived process: a log held in the UI is empty every time the UI
+// opens, which is precisely when someone wants to know what happened while
+// they were not looking.
+const MaxActivityRows = 2000
+
+// AppendActivity records one entry.
+func (s *DB) AppendActivity(e ActivityEntry) error {
+	at := e.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO activity(at, kind, path, size) VALUES(?, ?, ?, ?)`,
+		at.UnixNano(), e.Kind, e.Path, e.Size)
+	if err != nil {
+		return fmt.Errorf("record activity: %w", err)
+	}
+	return nil
+}
+
+// PruneActivity drops everything beyond the newest MaxActivityRows.
+func (s *DB) PruneActivity() error {
+	_, err := s.db.Exec(`
+		DELETE FROM activity WHERE id NOT IN (
+			SELECT id FROM activity ORDER BY id DESC LIMIT ?
+		)`, MaxActivityRows)
+	if err != nil {
+		return fmt.Errorf("prune activity: %w", err)
+	}
+	return nil
+}
+
+// RecentActivity returns the newest entries, oldest first so a log reads
+// top-to-bottom.
+func (s *DB) RecentActivity(limit int) ([]ActivityEntry, error) {
+	if limit <= 0 || limit > MaxActivityRows {
+		limit = MaxActivityRows
+	}
+
+	rows, err := s.db.Query(`
+		SELECT at, kind, path, size FROM (
+			SELECT id, at, kind, path, size FROM activity ORDER BY id DESC LIMIT ?
+		) ORDER BY id ASC`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("read activity: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ActivityEntry
+	for rows.Next() {
+		var e ActivityEntry
+		var at int64
+		if err := rows.Scan(&at, &e.Kind, &e.Path, &e.Size); err != nil {
+			return nil, err
+		}
+		e.At = time.Unix(0, at)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ClearActivity empties the log.
+func (s *DB) ClearActivity() error {
+	if _, err := s.db.Exec(`DELETE FROM activity`); err != nil {
+		return fmt.Errorf("clear activity: %w", err)
 	}
 	return nil
 }

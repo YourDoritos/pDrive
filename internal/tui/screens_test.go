@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/YourDoritos/pdrive/internal/config"
 	"github.com/YourDoritos/pdrive/internal/ipc"
@@ -68,8 +71,93 @@ func TestActivityScrolling(t *testing.T) {
 func TestActivityEmptyView(t *testing.T) {
 	m := NewActivityModel()
 	m.SetSize(100, 30)
-	if !strings.Contains(m.View(), "Nothing yet") {
-		t.Error("empty activity view should say so")
+
+	// Before the daemon answers, the screen must not claim there is nothing;
+	// it does not know yet.
+	if !strings.Contains(m.View(), "Loading") {
+		t.Errorf("an unloaded activity view should say so:\n%s", m.View())
+	}
+
+	m.SetHistory(&ipc.ActivityLog{})
+	if !strings.Contains(m.View(), "Nothing recorded") {
+		t.Errorf("an empty loaded view should say so:\n%s", m.View())
+	}
+}
+
+// The history belongs to the daemon, so closing and reopening the TUI must
+// not lose it.
+func TestActivityHistoryComesFromTheDaemon(t *testing.T) {
+	m := NewActivityModel()
+	m.SetSize(100, 30)
+
+	m.SetHistory(&ipc.ActivityLog{Entries: []ipc.ActivityData{
+		{Kind: "upload", Path: "old.txt", Size: 10,
+			At: time.Now().Add(-2 * time.Hour).Format(time.RFC3339)},
+		{Kind: "download", Path: "newer.txt", Size: 20,
+			At: time.Now().Add(-time.Minute).Format(time.RFC3339)},
+	}})
+
+	view := m.View()
+	for _, want := range []string{"old.txt", "newer.txt", "History (2)"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("history view missing %q\n%s", want, view)
+		}
+	}
+}
+
+// A transfer in flight must be visible while it moves, not only once it lands.
+func TestActivityShowsTransfersInFlight(t *testing.T) {
+	m := NewActivityModel()
+	m.SetSize(100, 30)
+	m.SetHistory(&ipc.ActivityLog{})
+
+	m.UpdateTransfer(ipc.TransferData{
+		Path: "Videos/holiday.mov", Total: 4 << 30, Done: 1 << 30,
+		Started: time.Now().Add(-10 * time.Second).Format(time.RFC3339),
+	})
+
+	view := m.View()
+	for _, want := range []string{"Transferring", "holiday.mov", "1.0 GiB / 4.0 GiB"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("in-flight view missing %q\n%s", want, view)
+		}
+	}
+
+	// Finishing removes it from the in-flight list.
+	m.UpdateTransfer(ipc.TransferData{Path: "Videos/holiday.mov", Finished: true})
+	if strings.Contains(m.View(), "Transferring") {
+		t.Error("a finished transfer is still shown as in flight")
+	}
+}
+
+// An upload and a download of the same path can overlap during a conflict.
+func TestActivityTracksUploadAndDownloadSeparately(t *testing.T) {
+	m := NewActivityModel()
+	m.SetSize(100, 30)
+	m.SetHistory(&ipc.ActivityLog{})
+
+	m.UpdateTransfer(ipc.TransferData{Path: "notes.md", Total: 100, Done: 10})
+	m.UpdateTransfer(ipc.TransferData{Path: "notes.md", Up: true, Total: 200, Done: 20})
+	if len(m.transfers) != 2 {
+		t.Fatalf("tracked %d transfers, want 2 (one each way)", len(m.transfers))
+	}
+
+	m.UpdateTransfer(ipc.TransferData{Path: "notes.md", Finished: true})
+	if len(m.transfers) != 1 {
+		t.Errorf("finishing the download removed %d entries", 2-len(m.transfers))
+	}
+}
+
+// A fresh snapshot replaces in-flight state; a transfer that finished while
+// the TUI was not looking must not linger forever.
+func TestSetHistoryReplacesStaleTransfers(t *testing.T) {
+	m := NewActivityModel()
+	m.SetSize(100, 30)
+	m.UpdateTransfer(ipc.TransferData{Path: "ghost.bin", Total: 100, Done: 50})
+
+	m.SetHistory(&ipc.ActivityLog{})
+	if len(m.transfers) != 0 {
+		t.Error("a stale transfer survived a fresh snapshot")
 	}
 }
 
@@ -129,11 +217,12 @@ func TestSettingsCycleAndSave(t *testing.T) {
 
 	m := NewSettingsModel(cfg)
 	m.SetSize(100, 30)
+	m.MoveCursor(1) // the folder row is first; move onto the size cap
 
 	if cfg.Sync.MaxAutoDownloadSize != 0 {
 		t.Fatalf("precondition: size cap = %d", cfg.Sync.MaxAutoDownloadSize)
 	}
-	m.Cycle() // first row is the size cap
+	m.Cycle()
 	if cfg.Sync.MaxAutoDownloadSize == 0 {
 		t.Error("cycling the size cap did not change it")
 	}
@@ -363,4 +452,94 @@ func TestPausedAndErrorSurviveTheSyncIndicator(t *testing.T) {
 	if !strings.Contains(flatten(m.View()), "guard stopped") {
 		t.Error("an error was hidden behind the sync indicator")
 	}
+}
+
+// The sync folder must be changeable from the UI, not only by editing a file.
+func TestSettingsRootIsEditable(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Sync.Root = "/tmp/pdrive-old"
+	cfg.Validate()
+
+	m := NewSettingsModel(cfg)
+	m.SetSize(100, 30)
+
+	if !m.OnRootRow() {
+		t.Fatal("the folder row should be selected first")
+	}
+	m.BeginEditRoot()
+	if !m.EditingRoot() {
+		t.Fatal("BeginEditRoot did not focus the field")
+	}
+	if !strings.Contains(m.View(), "Sync folder") {
+		t.Error("the folder row disappeared while editing")
+	}
+
+	// A path that would swallow the whole home directory must be refused.
+	home, _ := os.UserHomeDir()
+	m.rootInput.SetValue(home)
+	m.SubmitRoot()
+	if m.Confirming() {
+		t.Error("syncing the entire home directory was accepted")
+	}
+
+	// A sane destination asks for confirmation rather than acting at once.
+	m.rootInput.SetValue(filepath.Join(t.TempDir(), "new-place"))
+	m.SubmitRoot()
+	if !m.Confirming() {
+		t.Fatal("a valid folder did not ask for confirmation")
+	}
+	if cfg.Sync.Root != "/tmp/pdrive-old" {
+		t.Error("the folder changed before it was confirmed")
+	}
+
+	view := m.View()
+	for _, want := range []string{"Move the sync folder?", "moved, not downloaded again", "y: move"} {
+		if !strings.Contains(flatten(view), flatten(want)) {
+			t.Errorf("the confirmation does not say %q\n%s", want, view)
+		}
+	}
+
+	got := m.ConfirmRoot()
+	if got == "" || cfg.Sync.Root != got {
+		t.Errorf("confirming did not record the new folder: %q vs %q", got, cfg.Sync.Root)
+	}
+}
+
+func TestSettingsRootEditCanBeCancelled(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Sync.Root = "~/pdrive"
+	cfg.Validate()
+
+	m := NewSettingsModel(cfg)
+	m.SetSize(100, 30)
+	m.BeginEditRoot()
+	m.rootInput.SetValue("/tmp/somewhere-else")
+	m.CancelEditRoot()
+
+	if m.EditingRoot() || m.Confirming() {
+		t.Error("cancelling left the editor open")
+	}
+	if cfg.Sync.Root != "~/pdrive" {
+		t.Errorf("cancelling still changed the folder to %q", cfg.Sync.Root)
+	}
+}
+
+// The cursor spans the folder row plus every cycling setting, and must not
+// run off either end.
+func TestSettingsCursorRange(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Validate()
+	m := NewSettingsModel(cfg)
+
+	m.MoveCursor(-10)
+	if !m.OnRootRow() {
+		t.Error("the cursor ran above the folder row")
+	}
+	m.MoveCursor(1000)
+	if m.cursor != len(settingRows)-1 {
+		t.Errorf("cursor = %d, want %d", m.cursor, len(settingRows)-1)
+	}
+	// Cycling on the folder row must do nothing rather than panic.
+	m.MoveCursor(-1000)
+	m.Cycle()
 }

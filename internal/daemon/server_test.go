@@ -36,14 +36,15 @@ func newTestDaemon(t *testing.T) (*Daemon, string) {
 	}
 
 	d := &Daemon{
-		cfg:     cfg,
-		db:      db,
-		log:     NewLogger(filepath.Join(dir, "test.log"), false),
-		state:   StateIdle,
-		started: time.Now(),
-		syncReq: make(chan syncRequest, 4),
-		wake:    make(chan Trigger, 8),
-		subs:    map[chan *ipc.Event]struct{}{},
+		cfg:       cfg,
+		db:        db,
+		log:       NewLogger(filepath.Join(dir, "test.log"), false),
+		state:     StateIdle,
+		started:   time.Now(),
+		syncReq:   make(chan syncRequest, 4),
+		wake:      make(chan Trigger, 8),
+		subs:      map[chan *ipc.Event]struct{}{},
+		transfers: map[string]*ipc.TransferData{},
 	}
 	return d, filepath.Join(dir, "pdrive.sock")
 }
@@ -271,5 +272,83 @@ func TestChangedRecognisesRealWork(t *testing.T) {
 		if !changed(res) {
 			t.Errorf("%s did not count as activity", name)
 		}
+	}
+}
+
+// Engine events must reach the stored log, and transfers must be visible
+// while they are in flight rather than only once they land.
+func TestMirrorEventsBecomeHistoryAndTransfers(t *testing.T) {
+	d, _ := newTestDaemon(t)
+
+	// A transfer starting, moving, and finishing.
+	d.onMirrorEvent(mirror.Event{Kind: mirror.EventTransferStart, Path: "big.bin", Size: 1000})
+	log, err := d.Activity(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log.Transfers) != 1 || log.Transfers[0].Path != "big.bin" {
+		t.Fatalf("transfer not tracked: %+v", log.Transfers)
+	}
+
+	d.onMirrorEvent(mirror.Event{
+		Kind: mirror.EventTransferProgress, Path: "big.bin", Size: 1000, Done: 400,
+	})
+	log, _ = d.Activity(0)
+	if len(log.Transfers) != 1 || log.Transfers[0].Done != 400 {
+		t.Errorf("progress not applied: %+v", log.Transfers)
+	}
+
+	d.onMirrorEvent(mirror.Event{Kind: mirror.EventTransferDone, Path: "big.bin"})
+	log, _ = d.Activity(0)
+	if len(log.Transfers) != 0 {
+		t.Errorf("a finished transfer is still in flight: %+v", log.Transfers)
+	}
+
+	// A completed change is recorded.
+	d.onMirrorEvent(mirror.Event{Kind: mirror.EventUpload, Path: "big.bin", Size: 1000})
+	log, _ = d.Activity(0)
+	if len(log.Entries) != 1 {
+		t.Fatalf("history has %d entries, want 1", len(log.Entries))
+	}
+	if log.Entries[0].Kind != "upload" || log.Entries[0].Path != "big.bin" {
+		t.Errorf("entry = %+v", log.Entries[0])
+	}
+}
+
+// "skip" says a file was already correct. On a steady tree it is the
+// overwhelming majority of events, and storing it would push everything
+// meaningful out of a bounded log.
+func TestSkipEventsAreNotRecorded(t *testing.T) {
+	d, _ := newTestDaemon(t)
+
+	for i := 0; i < 20; i++ {
+		d.onMirrorEvent(mirror.Event{Kind: mirror.EventSkip, Path: "unchanged.txt"})
+	}
+	log, err := d.Activity(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log.Entries) != 0 {
+		t.Errorf("skips were recorded: %d entries", len(log.Entries))
+	}
+}
+
+// An upload and a download of the same path can overlap during a conflict, so
+// they must be tracked separately.
+func TestUploadAndDownloadOfOnePathTrackSeparately(t *testing.T) {
+	d, _ := newTestDaemon(t)
+
+	d.onMirrorEvent(mirror.Event{Kind: mirror.EventTransferStart, Path: "notes.md", Size: 10})
+	d.onMirrorEvent(mirror.Event{Kind: mirror.EventTransferStart, Path: "notes.md", Size: 20, Up: true})
+
+	log, _ := d.Activity(0)
+	if len(log.Transfers) != 2 {
+		t.Fatalf("tracked %d transfers, want 2", len(log.Transfers))
+	}
+
+	d.onMirrorEvent(mirror.Event{Kind: mirror.EventTransferDone, Path: "notes.md"})
+	log, _ = d.Activity(0)
+	if len(log.Transfers) != 1 || !log.Transfers[0].Up {
+		t.Errorf("finishing the download disturbed the upload: %+v", log.Transfers)
 	}
 }

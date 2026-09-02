@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -82,6 +83,9 @@ type Daemon struct {
 	// gateConn is the live connection to pdrive-gate, when one exists.
 	gateConn *gate.Conn
 
+	// transfers is what is moving right now, keyed by path.
+	transfers map[string]*ipc.TransferData
+
 	// Account quota, cached. It changes slowly and costs an API call, so it
 	// is refreshed on a long interval rather than on every status request.
 	quotaUsed    int64
@@ -137,15 +141,16 @@ func New(ctx context.Context, log *Logger) (*Daemon, error) {
 	}
 
 	d := &Daemon{
-		cfg:     cfg,
-		db:      db,
-		store:   store,
-		log:     log,
-		state:   StateIdle,
-		started: time.Now(),
-		syncReq: make(chan syncRequest, 16),
-		wake:    make(chan Trigger, 64),
-		subs:    map[chan *ipc.Event]struct{}{},
+		cfg:       cfg,
+		db:        db,
+		store:     store,
+		log:       log,
+		state:     StateIdle,
+		started:   time.Now(),
+		syncReq:   make(chan syncRequest, 16),
+		wake:      make(chan Trigger, 64),
+		subs:      map[chan *ipc.Event]struct{}{},
+		transfers: map[string]*ipc.TransferData{},
 	}
 
 	dr, err := drive.Open(ctx, drive.Options{
@@ -302,14 +307,7 @@ func (d *Daemon) runSync(ctx context.Context, req syncRequest) syncOutcome {
 
 	opts := req.opts
 	opts.Config = d.cfg
-	opts.Progress = func(ev mirror.Event) {
-		d.publish(ipc.EventActivity, ipc.ActivityData{
-			Kind: activityKind(ev.Kind), Path: ev.Path, Size: ev.Size,
-		})
-		if ev.Kind == mirror.EventWarn {
-			d.log.Warnf("%s: %v", ev.Path, ev.Err)
-		}
-	}
+	opts.Progress = d.onMirrorEvent
 
 	m, err := mirror.New(d.drive, d.db, opts)
 	if err != nil {
@@ -332,6 +330,9 @@ func (d *Daemon) runSync(ctx context.Context, req syncRequest) syncOutcome {
 
 	if err == nil {
 		d.refreshQuota(ctx)
+	}
+	if pruneErr := d.db.PruneActivity(); pruneErr != nil {
+		d.log.Debugf("prune activity: %v", pruneErr)
 	}
 
 	return d.finishSync(res, err)
@@ -647,3 +648,117 @@ func (d *Daemon) refreshQuota(ctx context.Context) {
 	d.quotaFetched = time.Now()
 	d.mu.Unlock()
 }
+
+// onMirrorEvent turns one engine event into in-flight state, a stored history
+// entry, or a pushed event — whichever it is.
+func (d *Daemon) onMirrorEvent(ev mirror.Event) {
+	switch ev.Kind {
+	case mirror.EventTransferStart:
+		t := &ipc.TransferData{
+			Path: ev.Path, Up: ev.Up, Total: ev.Size,
+			Started: time.Now().Format(time.RFC3339),
+		}
+		d.mu.Lock()
+		if d.transfers == nil {
+			// Defensive: assigning into a nil map panics, and a panic here
+			// would take the daemon down in the middle of a sync.
+			d.transfers = map[string]*ipc.TransferData{}
+		}
+		d.transfers[transferKey(ev)] = t
+		d.mu.Unlock()
+		d.publish(ipc.EventTransfer, *t)
+		return
+
+	case mirror.EventTransferProgress:
+		d.mu.Lock()
+		t, ok := d.transfers[transferKey(ev)]
+		if ok {
+			t.Done, t.Total = ev.Done, ev.Size
+		}
+		snapshot := ipc.TransferData{}
+		if ok {
+			snapshot = *t
+		}
+		d.mu.Unlock()
+		if ok {
+			d.publish(ipc.EventTransfer, snapshot)
+		}
+		return
+
+	case mirror.EventTransferDone:
+		d.mu.Lock()
+		delete(d.transfers, transferKey(ev))
+		d.mu.Unlock()
+		d.publish(ipc.EventTransfer, ipc.TransferData{
+			Path: ev.Path, Up: ev.Up, Finished: true,
+		})
+		return
+	}
+
+	if ev.Kind == mirror.EventWarn {
+		d.log.Warnf("%s: %v", ev.Path, ev.Err)
+	}
+
+	kind := activityKind(ev.Kind)
+	entry := ipc.ActivityData{Kind: kind, Path: ev.Path, Size: ev.Size}
+	d.publish(ipc.EventActivity, entry)
+
+	// Persist what is worth remembering. "skip" says a file was already
+	// correct, and on a steady tree it is the overwhelming majority of
+	// events; storing those would push everything meaningful out of the log.
+	if !worthRecording(kind) {
+		return
+	}
+	if err := d.db.AppendActivity(state.ActivityEntry{
+		At: time.Now(), Kind: kind, Path: ev.Path, Size: ev.Size,
+	}); err != nil {
+		d.log.Debugf("record activity: %v", err)
+	}
+}
+
+// transferKey separates an upload from a download of the same path, which can
+// legitimately overlap during a conflict.
+func transferKey(ev mirror.Event) string {
+	if ev.Up {
+		return "up:" + ev.Path
+	}
+	return "down:" + ev.Path
+}
+
+func worthRecording(kind string) bool {
+	switch kind {
+	case "skip", "unknown":
+		return false
+	}
+	return true
+}
+
+// Activity returns the stored history and anything currently in flight.
+func (d *Daemon) Activity(limit int) (ipc.ActivityLog, error) {
+	rows, err := d.db.RecentActivity(limit)
+	if err != nil {
+		return ipc.ActivityLog{}, err
+	}
+
+	out := ipc.ActivityLog{Entries: make([]ipc.ActivityData, 0, len(rows))}
+	for _, r := range rows {
+		out.Entries = append(out.Entries, ipc.ActivityData{
+			Kind: r.Kind, Path: r.Path, Size: r.Size,
+			At: r.At.Format(time.RFC3339),
+		})
+	}
+
+	d.mu.RLock()
+	for _, t := range d.transfers {
+		out.Transfers = append(out.Transfers, *t)
+	}
+	d.mu.RUnlock()
+
+	sort.Slice(out.Transfers, func(i, j int) bool {
+		return out.Transfers[i].Path < out.Transfers[j].Path
+	})
+	return out, nil
+}
+
+// ClearActivity empties the stored history.
+func (d *Daemon) ClearActivity() error { return d.db.ClearActivity() }

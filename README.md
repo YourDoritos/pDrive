@@ -141,8 +141,10 @@ rclone.
 | Session, state DB, log | `~/.local/state/pdrive/` |
 | Local trash | `~/.local/share/pdrive/trash/` |
 
-Most settings are editable in the TUI's Settings tab; the daemon picks them up
-without a restart.
+Settings are editable in the TUI's Settings tab and the daemon picks them up
+without a restart. The sync folder can be changed there too: pDrive **moves**
+your files rather than downloading them again, stopping the daemon for the
+move and starting it afterwards.
 
 ## Security
 

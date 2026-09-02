@@ -197,7 +197,9 @@ func (m *Mirror) pushNode(ctx context.Context, path string, n *LocalNode, byPath
 		name = path[idx+1:]
 	}
 
-	linkID, err := m.d.Upload(ctx, parentID, name, n.Mtime, f)
+	src := m.trackTransfer(path, n.Size, true, f)
+	linkID, err := m.d.Upload(ctx, parentID, name, n.Mtime, src)
+	m.endTransfer(path, true)
 	if err != nil {
 		return err
 	}

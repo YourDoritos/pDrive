@@ -2,22 +2,29 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/YourDoritos/pdrive/internal/ipc"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// maxActivityLines caps the scrollback. A sync of a large tree emits one
-// event per file; keeping all of them would grow without bound in a process
-// that is expected to stay open for days.
+// maxActivityLines caps what is held in memory for display. The daemon keeps
+// the durable history; this is only the window being shown.
 const maxActivityLines = 500
 
-// ActivityModel is a live log of what the daemon is doing.
+// ActivityModel shows what is moving now and what has moved before.
+//
+// The history comes from the daemon, not from this model: a log kept in the
+// UI is empty every time the UI opens, which is exactly when someone wants to
+// know what happened while they were not watching.
 type ActivityModel struct {
 	width, height int
-	lines         []activityLine
-	offset        int // how far scrolled back from the newest line
+
+	lines     []activityLine
+	transfers map[string]*ipc.TransferData
+	offset    int
+	loaded    bool
 }
 
 type activityLine struct {
@@ -28,29 +35,88 @@ type activityLine struct {
 }
 
 // NewActivityModel builds the activity screen.
-func NewActivityModel() ActivityModel { return ActivityModel{} }
+func NewActivityModel() ActivityModel {
+	return ActivityModel{transfers: map[string]*ipc.TransferData{}}
+}
 
 // SetSize records the terminal dimensions.
 func (m *ActivityModel) SetSize(w, h int) { m.width, m.height = w, h }
 
-// Add records one activity event.
+// SetHistory installs the log fetched from the daemon.
+func (m *ActivityModel) SetHistory(log *ipc.ActivityLog) {
+	if log == nil {
+		return
+	}
+	m.loaded = true
+
+	m.lines = m.lines[:0]
+	for _, e := range log.Entries {
+		at, err := time.Parse(time.RFC3339, e.At)
+		if err != nil {
+			at = time.Now()
+		}
+		m.lines = append(m.lines, activityLine{
+			at: at, kind: e.Kind, path: e.Path, size: e.Size,
+		})
+	}
+	m.trim()
+
+	// Replace rather than merge: this is a fresh authoritative snapshot, and
+	// a transfer that finished while we were not looking must not linger.
+	m.transfers = map[string]*ipc.TransferData{}
+	for i := range log.Transfers {
+		t := log.Transfers[i]
+		m.transfers[transferKey(t)] = &t
+	}
+}
+
+// Add records one live event.
 func (m *ActivityModel) Add(a ipc.ActivityData) {
-	// "skip" means a file was already correct. It is the overwhelming
-	// majority of events on a steady tree and says nothing happened, so it is
-	// dropped rather than burying the events that matter.
 	if a.Kind == "skip" {
 		return
 	}
+	at := time.Now()
+	if a.At != "" {
+		if parsed, err := time.Parse(time.RFC3339, a.At); err == nil {
+			at = parsed
+		}
+	}
 
-	m.lines = append(m.lines, activityLine{
-		at: time.Now(), kind: a.Kind, path: a.Path, size: a.Size,
-	})
+	m.lines = append(m.lines, activityLine{at: at, kind: a.Kind, path: a.Path, size: a.Size})
+	m.trim()
+	if m.offset > 0 {
+		m.offset++ // keep the view pinned while scrolled back
+	}
+}
+
+// UpdateTransfer applies a live transfer event.
+func (m *ActivityModel) UpdateTransfer(t ipc.TransferData) {
+	if m.transfers == nil {
+		m.transfers = map[string]*ipc.TransferData{}
+	}
+	key := transferKey(t)
+	if t.Finished {
+		delete(m.transfers, key)
+		return
+	}
+	if existing, ok := m.transfers[key]; ok {
+		existing.Done, existing.Total = t.Done, t.Total
+		return
+	}
+	copied := t
+	m.transfers[key] = &copied
+}
+
+func transferKey(t ipc.TransferData) string {
+	if t.Up {
+		return "up:" + t.Path
+	}
+	return "down:" + t.Path
+}
+
+func (m *ActivityModel) trim() {
 	if len(m.lines) > maxActivityLines {
 		m.lines = m.lines[len(m.lines)-maxActivityLines:]
-	}
-	// Following the tail is the useful default; scrolling back pins the view.
-	if m.offset > 0 {
-		m.offset++
 	}
 }
 
@@ -73,53 +139,124 @@ func (m *ActivityModel) ScrollDown(n int) {
 	}
 }
 
-// Clear empties the log.
+// Clear empties the displayed log.
 func (m *ActivityModel) Clear() {
 	m.lines = nil
 	m.offset = 0
 }
 
-// View renders the activity log.
+// View renders the activity screen.
 func (m ActivityModel) View() string {
-	if len(m.lines) == 0 {
-		body := lipgloss.JoinVertical(lipgloss.Left,
-			StyleDim.Render("  Nothing yet."),
+	var rows []string
+
+	if inflight := m.renderTransfers(); len(inflight) > 0 {
+		rows = append(rows, StyleSubtitle.Render("Transferring"), "")
+		rows = append(rows, inflight...)
+		rows = append(rows, "")
+	}
+
+	switch {
+	case len(m.lines) > 0:
+		title := fmt.Sprintf("History (%d)", len(m.lines))
+		if m.offset > 0 {
+			title += StyleWarning.Render(fmt.Sprintf("   ↑ %d newer", m.offset))
+		}
+		rows = append(rows, StyleSubtitle.Render(title), "")
+		for _, l := range m.visible() {
+			rows = append(rows, m.renderLine(l))
+		}
+	case !m.loaded:
+		rows = append(rows, StyleDim.Render("  Loading…"))
+	default:
+		rows = append(rows,
+			StyleDim.Render("  Nothing recorded yet."),
 			"",
-			StyleDim.Render("  Transfers, moves, deletions and conflicts appear"),
-			StyleDim.Render("  here as they happen."),
-			"",
-			StyleHelp.Render("s: sync  c: clear  1-4: tabs  q: quit"),
-		)
-		return CenterBox(m.width, m.height, StyleBox, body)
+			StyleDim.Render("  Transfers, moves, deletions and conflicts are kept"),
+			StyleDim.Render("  by the daemon, so this survives closing pDrive."))
 	}
 
-	rows := m.visible()
-	rendered := make([]string, 0, len(rows))
-	for _, l := range rows {
-		rendered = append(rendered, m.renderLine(l))
+	rows = append(rows, "",
+		StyleHelp.Render("↑/↓ j/k: scroll  s: sync  c: clear  1-4: tabs  q: quit"))
+
+	style := StyleActiveBox
+	if len(m.lines) == 0 && len(m.transfers) == 0 {
+		style = StyleBox
+	}
+	return CenterBox(m.width, m.height, style, lipgloss.JoinVertical(lipgloss.Left, rows...))
+}
+
+// renderTransfers draws a bar per transfer in flight.
+func (m ActivityModel) renderTransfers() []string {
+	if len(m.transfers) == 0 {
+		return nil
 	}
 
-	title := fmt.Sprintf("Activity (%d)", len(m.lines))
-	if m.offset > 0 {
-		title += StyleWarning.Render(fmt.Sprintf("  ↑ %d newer", m.offset))
+	keys := make([]string, 0, len(m.transfers))
+	for k := range m.transfers {
+		keys = append(keys, k)
 	}
+	sort.Strings(keys)
 
-	all := append([]string{StyleSubtitle.Render(title), ""}, rendered...)
-	all = append(all, "",
-		StyleHelp.Render("↑/↓ j/k: scroll  s: sync  c: clear  q: quit"))
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		t := m.transfers[k]
 
-	return CenterBox(m.width, m.height,
-		StyleActiveBox, lipgloss.JoinVertical(lipgloss.Left, all...))
+		arrow := StyleSelected.Render("↓")
+		if t.Up {
+			arrow = lipgloss.NewStyle().Foreground(ColorSecondary).Render("↑")
+		}
+
+		name := truncate(baseName(t.Path), 26)
+		bar := QuotaBar(t.Done, t.Total, 14)
+
+		amount := humanBytes(t.Done)
+		if t.Total > 0 {
+			amount = fmt.Sprintf("%s / %s", humanBytes(t.Done), humanBytes(t.Total))
+		}
+
+		line := fmt.Sprintf("  %s %-26s %s  %s", arrow, name, bar, StyleDim.Render(amount))
+		if rate := transferRate(t); rate != "" {
+			line += StyleDim.Render("  " + rate)
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// transferRate estimates throughput from the elapsed time.
+func transferRate(t *ipc.TransferData) string {
+	if t.Started == "" || t.Done <= 0 {
+		return ""
+	}
+	started, err := time.Parse(time.RFC3339, t.Started)
+	if err != nil {
+		return ""
+	}
+	elapsed := time.Since(started).Seconds()
+	// Below a second the estimate is dominated by startup and reads as noise.
+	if elapsed < 1 {
+		return ""
+	}
+	return humanBytes(int64(float64(t.Done)/elapsed)) + "/s"
+}
+
+func baseName(p string) string {
+	for i := len(p) - 1; i >= 0; i-- {
+		if p[i] == '/' {
+			return p[i+1:]
+		}
+	}
+	return p
 }
 
 // visible returns the slice of lines that fits the window.
 func (m ActivityModel) visible() []activityLine {
-	rows := m.height - 8 // borders, title, help
+	rows := m.height - 10 - 2*len(m.transfers)
 	if rows < 3 {
 		rows = 3
 	}
-	if rows > 30 {
-		rows = 30
+	if rows > 24 {
+		rows = 24
 	}
 
 	end := len(m.lines) - m.offset
@@ -136,7 +273,14 @@ func (m ActivityModel) visible() []activityLine {
 func (m ActivityModel) renderLine(l activityLine) string {
 	label, style := activityLabel(l.kind)
 
-	line := StyleDim.Render("  "+l.at.Format("15:04:05")) + " " +
+	stamp := l.at.Format("15:04:05")
+	// A log that survives restarts spans days, so the day matters once the
+	// entry is not from today.
+	if time.Since(l.at) > 12*time.Hour {
+		stamp = l.at.Format("02 Jan 15:04")
+	}
+
+	line := StyleDim.Render("  "+fmt.Sprintf("%-12s", stamp)) + " " +
 		style.Width(9).Render(label) + " " +
 		StyleValue.Render(truncate(l.path, m.pathWidth()))
 	if l.size > 0 {
@@ -146,9 +290,7 @@ func (m ActivityModel) renderLine(l activityLine) string {
 }
 
 func (m ActivityModel) pathWidth() int {
-	// The panel is a fixed width, so this follows it rather than the
-	// terminal: timestamp, label, padding and size take the rest.
-	return BoxWidth - 34
+	return BoxWidth - 38
 }
 
 // activityLabel maps an event kind to a short label and a colour, so a glance

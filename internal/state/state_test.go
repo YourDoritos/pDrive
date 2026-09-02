@@ -268,3 +268,105 @@ func TestReopenPersists(t *testing.T) {
 		t.Errorf("cursor did not survive reopen: %q", v)
 	}
 }
+
+// The log lives in the database because the daemon outlives the UI. A log
+// held in the TUI is empty every time the TUI opens — which is exactly when
+// someone wants to know what happened while they were not watching.
+func TestActivityLogPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().Add(-time.Hour)
+	for i, e := range []ActivityEntry{
+		{At: base, Kind: "download", Path: "a.txt", Size: 10},
+		{At: base.Add(time.Minute), Kind: "upload", Path: "b.txt", Size: 20},
+		{At: base.Add(2 * time.Minute), Kind: "conflict", Path: "c.txt"},
+	} {
+		if err := db.AppendActivity(e); err != nil {
+			t.Fatalf("entry %d: %v", i, err)
+		}
+	}
+	db.Close()
+
+	// Reopen: a restart of the daemon must not lose it either.
+	db2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+
+	got, err := db2.RecentActivity(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("read %d entries, want 3", len(got))
+	}
+	// Oldest first, so a log reads top to bottom.
+	if got[0].Path != "a.txt" || got[2].Path != "c.txt" {
+		t.Errorf("wrong order: %s … %s", got[0].Path, got[2].Path)
+	}
+	if got[1].Kind != "upload" || got[1].Size != 20 {
+		t.Errorf("entry = %+v", got[1])
+	}
+	if got[0].At.Unix() != base.Unix() {
+		t.Errorf("timestamp = %v, want %v", got[0].At, base)
+	}
+}
+
+func TestRecentActivityLimit(t *testing.T) {
+	db := newTestDB(t)
+	for i := 0; i < 50; i++ {
+		if err := db.AppendActivity(ActivityEntry{Kind: "upload", Path: "f.txt"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := db.RecentActivity(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 10 {
+		t.Errorf("limit ignored: got %d entries", len(got))
+	}
+}
+
+// A busy sync emits an entry per file; without pruning the table grows without
+// bound in a process that runs for months.
+func TestPruneActivityBoundsTheTable(t *testing.T) {
+	db := newTestDB(t)
+
+	for i := 0; i < MaxActivityRows+250; i++ {
+		if err := db.AppendActivity(ActivityEntry{Kind: "upload", Path: "f.txt"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.PruneActivity(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.RecentActivity(MaxActivityRows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != MaxActivityRows {
+		t.Errorf("after pruning there are %d rows, want %d", len(got), MaxActivityRows)
+	}
+}
+
+func TestClearActivity(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AppendActivity(ActivityEntry{Kind: "upload", Path: "f.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ClearActivity(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := db.RecentActivity(10)
+	if len(got) != 0 {
+		t.Errorf("clear left %d entries", len(got))
+	}
+}
