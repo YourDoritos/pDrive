@@ -140,6 +140,9 @@ func cmdStatus(args []string) error {
 			icon = "?"
 		}
 		line := fmt.Sprintf("pDrive %s %d files", icon, st.Files)
+		if st.QuotaTotal > 0 {
+			line += fmt.Sprintf(" %s", humanBytes(st.QuotaUsed))
+		}
 		if st.Conflicts > 0 {
 			line += fmt.Sprintf(" (%d conflicts)", st.Conflicts)
 		}
@@ -153,8 +156,15 @@ func cmdStatus(args []string) error {
 	}
 	fmt.Printf("Account      %s\n", orDash(st.Account))
 	fmt.Printf("Folder       %s\n", st.Root)
-	fmt.Printf("Tracked      %d files, %d folders\n", st.Files, st.Dirs)
-	fmt.Printf("On disk      %s of %s\n", humanBytes(st.OnDisk), humanBytes(st.Bytes))
+	fmt.Printf("Synced       %d files, %d folders (%s on disk)\n",
+		st.Files, st.Dirs, humanBytes(st.OnDisk))
+	// The account quota, not the size of the local mirror. Printing the
+	// mirror against itself always reads as a full drive.
+	if st.QuotaTotal > 0 {
+		fmt.Printf("Drive        %s of %s used (%.1f%%)\n",
+			humanBytes(st.QuotaUsed), humanBytes(st.QuotaTotal),
+			float64(st.QuotaUsed)/float64(st.QuotaTotal)*100)
+	}
 	if st.Stubs > 0 {
 		fmt.Printf("Stubs        %d over the size cap — `pdrivectl get <path>`\n", st.Stubs)
 	}
