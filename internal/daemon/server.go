@@ -100,6 +100,12 @@ func (d *Daemon) dispatch(ctx context.Context, conn *ipc.Conn, req *ipc.Request)
 	case ipc.CmdPing:
 		return ipc.OK(nil)
 
+	case ipc.CmdSubscribe:
+		// Takes over the connection: from here it carries events, not
+		// responses. Returning nil tells the caller not to reply.
+		go d.streamEvents(ctx, conn)
+		return nil
+
 	case ipc.CmdStatus:
 		return ipc.OK(d.Status())
 
@@ -115,6 +121,12 @@ func (d *Daemon) dispatch(ctx context.Context, conn *ipc.Conn, req *ipc.Request)
 			return ipc.Errorf("%v", err)
 		}
 		return ipc.OK(resultToData(res))
+
+	case ipc.CmdReload:
+		if err := d.Reload(); err != nil {
+			return ipc.Errorf("%v", err)
+		}
+		return ipc.OK(nil)
 
 	case ipc.CmdPause:
 		d.Pause()
@@ -155,5 +167,34 @@ func resultToData(res *mirror.Result) ipc.SyncData {
 		TrashedRemote: res.TrashedRemote, Deleted: res.Deleted, Stubbed: res.Stubbed,
 		Conflicts: res.Conflicts, Warnings: res.Warnings,
 		Bytes: res.Bytes, UploadedBytes: res.UploadedBytes, FullMirror: res.FullMirror,
+	}
+}
+
+// streamEvents pushes daemon events down one connection until it closes.
+func (d *Daemon) streamEvents(ctx context.Context, conn *ipc.Conn) {
+	events, unsubscribe := d.Subscribe()
+	defer unsubscribe()
+
+	// Open with the current status so a client that attaches mid-sync renders
+	// something true immediately rather than an empty screen.
+	if err := conn.SendEvent(&ipc.Event{
+		Type: ipc.EventSyncFinished,
+		Data: ipc.MarshalData(resultToData(nil)),
+	}); err != nil {
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt, ok := <-events:
+			if !ok {
+				return
+			}
+			if err := conn.SendEvent(evt); err != nil {
+				return // client went away
+			}
+		}
 	}
 }

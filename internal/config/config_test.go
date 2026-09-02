@@ -9,15 +9,7 @@ import (
 
 func setTestPaths(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
-	old := [4]string{configDir, stateDir, dataDir, cacheDir}
-	configDir = filepath.Join(dir, "config")
-	stateDir = filepath.Join(dir, "state")
-	dataDir = filepath.Join(dir, "data")
-	cacheDir = filepath.Join(dir, "cache")
-	t.Cleanup(func() {
-		configDir, stateDir, dataDir, cacheDir = old[0], old[1], old[2], old[3]
-	})
+	t.Cleanup(UseTestDirs(t.TempDir()))
 }
 
 func TestDefaultsMatchSpec(t *testing.T) {

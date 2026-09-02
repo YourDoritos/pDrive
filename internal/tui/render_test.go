@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/YourDoritos/pdrive/internal/api"
 	"github.com/YourDoritos/pdrive/internal/config"
+	"github.com/YourDoritos/pdrive/internal/ipc"
 )
 
 // The third-party disclosure is mandatory wherever pDrive asks for account
@@ -41,35 +41,76 @@ func TestLoginViewRendersEachStep(t *testing.T) {
 	}
 }
 
-func TestStatusViewShowsQuota(t *testing.T) {
+func TestStatusViewShowsQuotaAndState(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Validate()
 
 	m := NewStatusModel(cfg)
 	m.SetSize(100, 30)
-	m.SetUser(&api.User{
-		Email:     "someone@proton.me",
-		UsedSpace: 128 * 1024 * 1024 * 1024,
-		MaxSpace:  512 * 1024 * 1024 * 1024,
-		MaxUpload: 5 * 1024 * 1024 * 1024,
-		Keys:      []api.Key{{ID: "k1", Primary: 1, Active: 1}},
+	m.SetStatus(&ipc.StatusData{
+		State:   "idle",
+		Account: "someone@proton.me",
+		Root:    "/home/someone/pdrive",
+		Files:   12, Dirs: 3,
+		Bytes: 512 * 1024 * 1024 * 1024, OnDisk: 128 * 1024 * 1024 * 1024,
+		GateActive: true,
 	})
 
 	view := m.View()
-	for _, want := range []string{"someone@proton.me", "128.0 GiB", "512.0 GiB", "25.0%"} {
+	for _, want := range []string{"someone@proton.me", "128.0 GiB", "512.0 GiB", "12 files", "up to date"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("status view missing %q\n%s", want, view)
 		}
 	}
 }
 
-func TestStatusViewHandlesZeroQuota(t *testing.T) {
+// The daemon being down is the one state a user must not misread as "synced".
+func TestStatusViewWhenDaemonIsDown(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Validate()
+
 	m := NewStatusModel(cfg)
-	m.SetUser(&api.User{Email: "x@y.z"})
-	if m.View() == "" {
-		t.Error("status view with zero quota rendered empty")
+	m.SetSize(100, 30)
+	m.SetDaemonDown()
+
+	view := m.View()
+	for _, want := range []string{"daemon not running", "systemctl --user"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("daemon-down view missing %q\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "up to date") {
+		t.Error("a stopped daemon must never render as up to date")
+	}
+}
+
+func TestStatusViewSurfacesConflictsAndStubs(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Validate()
+
+	m := NewStatusModel(cfg)
+	m.SetSize(100, 30)
+	m.SetStatus(&ipc.StatusData{State: "idle", Conflicts: 2, Stubs: 5})
+
+	view := m.View()
+	if !strings.Contains(view, "2") || !strings.Contains(view, "Conflicts") {
+		t.Errorf("conflicts not surfaced:\n%s", view)
+	}
+	if !strings.Contains(view, "size cap") {
+		t.Errorf("stubs not surfaced:\n%s", view)
+	}
+}
+
+func TestStatusViewShowsError(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Validate()
+
+	m := NewStatusModel(cfg)
+	m.SetSize(100, 30)
+	m.SetStatus(&ipc.StatusData{State: "error", LastError: "deletion-cliff guard stopped this pass"})
+
+	if !strings.Contains(m.View(), "deletion-cliff") {
+		t.Error("an error state must show what went wrong")
 	}
 }
 

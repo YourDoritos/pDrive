@@ -3,20 +3,24 @@ package tui
 import (
 	"fmt"
 
-	"github.com/YourDoritos/pdrive/internal/api"
+	"time"
+
 	"github.com/YourDoritos/pdrive/internal/config"
+	"github.com/YourDoritos/pdrive/internal/ipc"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// StatusModel shows the authenticated account.
-//
-// Phase 0 scope: prove the credential chain works end to end. The sync
-// status, activity log and conflict browser arrive in Phase 3.
+// StatusModel is the main screen: what the daemon is doing and what the
+// folder holds.
 type StatusModel struct {
 	width, height int
-	user          *api.User
 	cfg           *config.Config
-	gateAvailable bool
+
+	status    *ipc.StatusData
+	daemonUp  bool
+	syncing   bool
+	lastEvent string
+	spinner   int
 }
 
 // NewStatusModel builds the status screen.
@@ -27,77 +31,160 @@ func NewStatusModel(cfg *config.Config) StatusModel {
 // SetSize records the terminal dimensions.
 func (m *StatusModel) SetSize(w, h int) { m.width, m.height = w, h }
 
-// SetUser installs the authenticated account.
-func (m *StatusModel) SetUser(u *api.User) { m.user = u }
+// SetStatus installs the latest daemon status.
+func (m *StatusModel) SetStatus(s *ipc.StatusData) {
+	m.status = s
+	m.daemonUp = s != nil
+	if s != nil {
+		m.syncing = s.State == "syncing"
+	}
+}
 
-// SetGateAvailable records whether pdrive-gate is reachable.
-func (m *StatusModel) SetGateAvailable(ok bool) { m.gateAvailable = ok }
+// SetDaemonDown records that the daemon is unreachable.
+func (m *StatusModel) SetDaemonDown() {
+	m.daemonUp = false
+	m.status = nil
+}
+
+// SetActivity records the most recent activity line.
+func (m *StatusModel) SetActivity(line string) { m.lastEvent = line }
+
+// Tick advances the spinner.
+func (m *StatusModel) Tick() { m.spinner++ }
+
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // View renders the status screen.
 func (m StatusModel) View() string {
-	if m.user == nil {
-		return StyleDim.Render("  no account loaded")
+	if !m.daemonUp || m.status == nil {
+		return m.viewDaemonDown()
 	}
+	st := m.status
 
-	name := m.user.Email
-	if name == "" {
-		name = m.user.Name
-	}
-
-	quotaWidth := 32
-	usedPct := 0.0
-	if m.user.MaxSpace > 0 {
-		usedPct = float64(m.user.UsedSpace) / float64(m.user.MaxSpace) * 100
-	}
+	state := m.renderState(st)
 
 	rows := []string{
-		row("Account", StyleValue.Render(name)),
-		row("Storage", fmt.Sprintf("%s  %s / %s  (%.1f%%)",
-			QuotaBar(m.user.UsedSpace, m.user.MaxSpace, quotaWidth),
-			humanBytes(m.user.UsedSpace),
-			humanBytes(m.user.MaxSpace),
-			usedPct)),
-		row("Max upload", StyleValue.Render(humanBytes(m.user.MaxUpload))),
-		row("Keys", StyleSuccess.Render(fmt.Sprintf("unlocked (%d on account)", len(m.user.Keys)))),
+		row("Status", state),
+		row("Account", StyleValue.Render(orDash(st.Account))),
+		row("Folder", StyleValue.Render(st.Root)),
 		"",
-		row("Sync folder", StyleValue.Render(m.cfg.SyncRoot())),
-		row("Freshness", m.freshnessLine()),
-		row("Size cap", StyleValue.Render(sizeCap(m.cfg.Sync.MaxAutoDownloadSize))),
+		row("Files", StyleValue.Render(fmt.Sprintf("%d files, %d folders", st.Files, st.Dirs))),
+		row("Storage", fmt.Sprintf("%s  %s of %s",
+			QuotaBar(st.OnDisk, st.Bytes, 24), humanBytes(st.OnDisk), humanBytes(st.Bytes))),
 	}
 
-	body := StyleTitle.Render("pDrive") + "  " +
-		StyleSubtitle.Render("signed in") + "\n\n" +
-		lipgloss.JoinVertical(lipgloss.Left, rows...)
+	if st.Stubs > 0 {
+		rows = append(rows, row("Not downloaded",
+			StyleWarning.Render(fmt.Sprintf("%d over the size cap", st.Stubs))))
+	}
+	if st.Conflicts > 0 {
+		rows = append(rows, row("Conflicts",
+			StyleError.Render(fmt.Sprintf("%d — press 3", st.Conflicts))))
+	}
 
-	phase := StyleWarning.Render(
-		"Phase 0: authentication only. No files are synced yet — nothing on this\n" +
-			"  machine or in your account is read or written beyond the account query above.")
+	rows = append(rows,
+		"",
+		row("Freshness", m.renderFreshness(st)),
+		row("Last sync", StyleDim.Render(relTime(st.LastSync))),
+		row("Daemon up", StyleDim.Render(orDash(st.Uptime))),
+	)
 
-	help := StyleHelp.Render("l: log out   q: quit")
+	if m.lastEvent != "" {
+		rows = append(rows, "", row("Latest", StyleDim.Render(truncate(m.lastEvent, m.contentWidth()-20))))
+	}
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		"", StyleActiveBox.Render(body), "", StyleBox.Render(phase), "", help)
+	body := lipgloss.JoinVertical(lipgloss.Left, rows...)
+	help := StyleHelp.Render("s: sync now   p: pause/resume   r: refresh   q: quit")
+
+	return lipgloss.JoinVertical(lipgloss.Left, "", StyleActiveBox.Render(body), "", help)
 }
 
-func (m StatusModel) freshnessLine() string {
-	if !m.cfg.Freshness.Gate {
-		return StyleDim.Render("polling only (gate disabled in config)")
+func (m StatusModel) renderState(st *ipc.StatusData) string {
+	switch st.State {
+	case "syncing":
+		frame := spinnerFrames[m.spinner%len(spinnerFrames)]
+		return lipgloss.NewStyle().Foreground(ColorAccent).Render(frame + " syncing")
+	case "paused":
+		return StyleWarning.Render("‖ paused")
+	case "error":
+		return StyleError.Render("! " + truncate(st.LastError, m.contentWidth()-20))
+	default:
+		return StyleSuccess.Render("✓ up to date")
 	}
-	if m.gateAvailable {
-		return StyleSuccess.Render(fmt.Sprintf("gate active (blocking, max %dms)", m.cfg.Freshness.MaxBlockMS))
+}
+
+func (m StatusModel) renderFreshness(st *ipc.StatusData) string {
+	if st.GateActive {
+		return StyleSuccess.Render("gate active — listings wait until current")
 	}
-	return StyleWarning.Render("gate not running — falling back to polling")
+	if m.cfg != nil && !m.cfg.Freshness.Gate {
+		return StyleDim.Render("polling (gate disabled in settings)")
+	}
+	return StyleWarning.Render("polling — pdrive-gate not running")
+}
+
+func (m StatusModel) viewDaemonDown() string {
+	body := lipgloss.JoinVertical(lipgloss.Left,
+		row("Status", StyleError.Render("daemon not running")),
+		"",
+		StyleDim.Render("  Nothing is syncing. Start the daemon with:"),
+		"",
+		StyleValue.Render("    systemctl --user enable --now pdrived"),
+		"",
+		StyleDim.Render("  Your files are untouched either way — pdrive only"),
+		StyleDim.Render("  syncs while the daemon is running."),
+	)
+	help := StyleHelp.Render("r: retry   q: quit")
+	return lipgloss.JoinVertical(lipgloss.Left, "", StyleBox.Render(body), "", help)
+}
+
+func (m StatusModel) contentWidth() int {
+	if m.width < 40 {
+		return 40
+	}
+	return m.width
 }
 
 func row(label, value string) string {
 	return StyleLabel.Render("  "+label) + " " + value
 }
 
-func sizeCap(n int64) string {
-	if n <= 0 {
-		return "unlimited"
+func orDash(s string) string {
+	if s == "" {
+		return "—"
 	}
-	return humanBytes(n) + " (larger files land as .pdrive-stub)"
+	return s
+}
+
+func truncate(s string, max int) string {
+	if max < 8 {
+		max = 8
+	}
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-1] + "…"
+}
+
+func relTime(s string) string {
+	if s == "" {
+		return "never"
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return s
+	}
+	d := time.Since(t).Round(time.Second)
+	switch {
+	case d < 2*time.Second:
+		return "just now"
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	default:
+		return t.Local().Format("2006-01-02 15:04")
+	}
 }
 
 // humanBytes formats a byte count with binary units.

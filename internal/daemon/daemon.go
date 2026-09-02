@@ -176,6 +176,32 @@ func (d *Daemon) Close() {
 // Config returns the daemon's configuration.
 func (d *Daemon) Config() *config.Config { return d.cfg }
 
+// Reload re-reads config.toml.
+//
+// The sync root is deliberately NOT applied to a running daemon. Moving it
+// would strand the state database against a folder full of files it has never
+// seen, and the next pass would read that as a mass deletion. Changing it
+// requires a restart, where the guards see a coherent picture from the start.
+func (d *Daemon) Reload() error {
+	fresh, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	d.mu.Lock()
+	oldRoot := d.cfg.SyncRoot()
+	newRoot := fresh.SyncRoot()
+	fresh.Sync.Root = d.cfg.Sync.Root
+	d.cfg = fresh
+	d.mu.Unlock()
+
+	if oldRoot != newRoot {
+		d.log.Warnf("sync folder changed to %s in config; restart pdrived to apply", newRoot)
+	}
+	d.log.Infof("configuration reloaded")
+	return nil
+}
+
 // Run starts the sync loop and blocks until ctx is cancelled.
 func (d *Daemon) Run(ctx context.Context) error {
 	go d.syncLoop(ctx)

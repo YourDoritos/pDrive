@@ -22,6 +22,12 @@ const (
 	// CmdNotifyOpen is how pdrive-gate reports that a synced directory is
 	// being listed. The daemon answers when that directory is fresh.
 	CmdNotifyOpen = "notify-open"
+	// CmdSubscribe turns the connection into a one-way event stream. The
+	// daemon sends Events on it until the client disconnects.
+	CmdSubscribe = "subscribe"
+	// CmdReload re-reads config.toml, so settings changed in the TUI take
+	// effect without restarting the daemon.
+	CmdReload = "reload"
 )
 
 // Request is a command from a client to the daemon.

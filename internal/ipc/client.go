@@ -80,6 +80,9 @@ func (c *Client) Sync(p SyncParams) (*SyncData, error) {
 	return &out, nil
 }
 
+// Reload asks the daemon to re-read its configuration.
+func (c *Client) Reload() error { return c.call(CmdReload, nil, nil) }
+
 // Pause stops automatic syncing.
 func (c *Client) Pause() error { return c.call(CmdPause, nil, nil) }
 
@@ -98,4 +101,39 @@ func (c *Client) Conflicts() ([]ConflictEntry, error) {
 // Get materializes a stubbed file.
 func (c *Client) Get(path string) error {
 	return c.call(CmdGet, GetParams{Path: path}, nil)
+}
+
+// Subscribe opens a dedicated connection carrying daemon events.
+//
+// Events arrive on the returned channel until stop is called or the daemon
+// goes away, at which point the channel closes. A separate connection is used
+// so request/response traffic is never interleaved with the stream.
+func Subscribe(socketPath string) (<-chan *Event, func(), error) {
+	raw, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err != nil {
+		return nil, nil, err
+	}
+	conn := NewConn(raw)
+
+	if err := conn.SendRequest(&Request{Command: CmdSubscribe}); err != nil {
+		raw.Close()
+		return nil, nil, err
+	}
+
+	out := make(chan *Event, 64)
+	go func() {
+		defer close(out)
+		for {
+			var evt Event
+			if err := ReadJSON(conn.Reader, &evt); err != nil {
+				return
+			}
+			select {
+			case out <- &evt:
+			default: // a slow reader drops events rather than stalling
+			}
+		}
+	}()
+
+	return out, func() { raw.Close() }, nil
 }
