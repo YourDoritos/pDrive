@@ -497,3 +497,87 @@ func TestLocalOnlyEditIsNotAConflict(t *testing.T) {
 		}
 	}
 }
+
+// Regression: a remote create must arrive locally even when the event payload
+// omits Link.State.
+//
+// LinkStateDraft is the zero value, so an absent State decodes as Draft. The
+// original classifier treated "not Active" as a deletion, which turned every
+// newly created remote file into a delete for an ID the database had never
+// seen — dropped silently. Remote deletes kept working, so the folder looked
+// half-functional: things vanished on request but never appeared.
+func TestRemoteCreateArrivesWithoutStateField(t *testing.T) {
+	f := newFakeDrive()
+	f.addFileWithDigest("existing.txt", "already here\n")
+
+	m, _, root := newTestMirror(t, f, nil)
+	mustSyncBoth(t, m)
+
+	// A file appears remotely; the event carries no State (the zero value).
+	f.addFileWithDigest("appeared.txt", "created in the browser\n")
+	f.delta = upsertDelta("link:appeared.txt", "link:root")
+
+	res := mustSyncBoth(t, m)
+
+	if res.Downloaded != 1 {
+		t.Errorf("downloaded=%d, want 1 — the remote create was dropped", res.Downloaded)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "appeared.txt"))
+	if err != nil {
+		t.Fatalf("the new remote file never arrived locally: %v", err)
+	}
+	if string(got) != "created in the browser\n" {
+		t.Errorf("content = %q", got)
+	}
+}
+
+// An event without ParentLinkID must still be placed, by resolving the parent
+// rather than dropping the change.
+func TestRemoteCreateWithoutParentInEvent(t *testing.T) {
+	f := newFakeDrive()
+	f.addDir("Docs")
+	m, _, root := newTestMirror(t, f, nil)
+	mustSyncBoth(t, m)
+
+	f.addFileWithDigest("Docs/late.txt", "arrived late\n")
+	f.delta = &drive.Delta{
+		Cursor: "cursor-noparent",
+		Changes: []drive.Change{{
+			Kind: drive.ChangeUpsert, LinkID: "link:Docs/late.txt", ParentID: "",
+		}},
+	}
+
+	mustSyncBoth(t, m)
+
+	if _, err := os.Stat(filepath.Join(root, "Docs", "late.txt")); err != nil {
+		t.Errorf("a create with no parent in the event was dropped: %v", err)
+	}
+}
+
+// Trashing remotely still has to remove the file locally. It arrives as an
+// Update carrying an explicitly trashed state, not as a Delete.
+func TestRemoteTrashViaUpdateStillRemovesLocally(t *testing.T) {
+	f := newFakeDrive()
+	f.addFileWithDigest("doomed.txt", "bye\n")
+	f.addFileWithDigest("safe.txt", "stay\n")
+
+	m, _, root := newTestMirror(t, f, nil)
+	mustSyncBoth(t, m)
+
+	// The fake models this the way the drive layer hands it up: an explicit
+	// delete after the state check has been applied.
+	delete(f.files, "doomed.txt")
+	f.delta = &drive.Delta{
+		Cursor:  "cursor-trash",
+		Changes: []drive.Change{{Kind: drive.ChangeDelete, LinkID: "link:doomed.txt"}},
+	}
+
+	mustSyncBoth(t, m)
+
+	if _, err := os.Stat(filepath.Join(root, "doomed.txt")); !os.IsNotExist(err) {
+		t.Error("a remotely trashed file is still in the sync folder")
+	}
+	if _, err := os.Stat(filepath.Join(root, "safe.txt")); err != nil {
+		t.Error("an unrelated file was removed")
+	}
+}

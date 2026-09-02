@@ -272,8 +272,20 @@ func (m *Mirror) applyEvents(ctx context.Context, cursor string) (*Result, error
 		case ChangeDeleteKind:
 			deletions = append(deletions, c)
 		default:
-			if c.ParentID != "" {
-				dirsToRelist[c.ParentID] = true
+			parent := c.ParentID
+			if parent == "" && c.LinkID != "" {
+				// No parent in the payload. Resolving it costs one call and
+				// is the difference between the change arriving and being
+				// dropped without trace.
+				resolved, err := m.d.LinkParent(ctx, c.LinkID)
+				if err != nil {
+					m.emit(Event{Kind: EventWarn, Err: err})
+					continue
+				}
+				parent = resolved
+			}
+			if parent != "" {
+				dirsToRelist[parent] = true
 			}
 		}
 	}

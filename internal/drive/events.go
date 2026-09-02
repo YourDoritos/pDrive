@@ -88,27 +88,16 @@ func (d *Drive) PollEvents(ctx context.Context, cursor string) (*Delta, error) {
 	}
 
 	for _, e := range ev.Events {
-		change := Change{
+		kind, ok := classifyEvent(e)
+		if !ok {
+			continue
+		}
+		delta.Changes = append(delta.Changes, Change{
+			Kind:     kind,
 			LinkID:   e.Link.LinkID,
 			ParentID: e.Link.ParentLinkID,
 			IsDir:    e.Link.Type == proton.LinkTypeFolder,
-		}
-
-		switch e.EventType {
-		case proton.LinkEventDelete:
-			change.Kind = ChangeDelete
-		case proton.LinkEventCreate, proton.LinkEventUpdate, proton.LinkEventUpdateMetadata:
-			change.Kind = ChangeUpsert
-			// A link that is no longer active has been trashed. Proton
-			// reports that as an update, not a delete, so treating it as an
-			// upsert would leave the file sitting on disk forever.
-			if e.Link.State != proton.LinkStateActive {
-				change.Kind = ChangeDelete
-			}
-		default:
-			continue
-		}
-		delta.Changes = append(delta.Changes, change)
+		})
 	}
 
 	return delta, nil
@@ -147,4 +136,48 @@ func (d *Drive) ListDir(ctx context.Context, linkID, prefix string) ([]Node, err
 		out = append(out, node)
 	}
 	return out, nil
+}
+
+// LinkParent resolves a node's parent folder.
+//
+// Used when an event does not carry ParentLinkID: without a parent there is
+// no directory to re-list, and the change would be dropped.
+func (d *Drive) LinkParent(ctx context.Context, linkID string) (string, error) {
+	link, err := d.pd.GetLink(ctx, linkID)
+	if err != nil {
+		return "", fmt.Errorf("resolve parent of %s: %w", linkID, err)
+	}
+	return link.ParentLinkID, nil
+}
+
+// classifyEvent decides whether one Drive event is a creation/update or a
+// removal. Pure, so the rule below can be tested directly against the payload
+// shapes Proton actually sends.
+//
+// The rule: only an EXPLICIT trashed or deleted state counts as a removal.
+//
+// Testing for "not active" instead looks equivalent and is not.
+// LinkStateDraft is the zero value, so an event whose State field is absent
+// decodes as Draft — and every newly created remote file was classified as a
+// deletion, looked up by an ID the database had never seen, and dropped
+// without trace. Remote deletions kept working, so the symptom was a folder
+// where things vanished on request but never appeared.
+//
+// A genuine draft is a file mid-upload with no committed content. Treating it
+// as an upsert is harmless: ListDirectory returns active links only, so a
+// draft does not show up in the re-listing that follows.
+func classifyEvent(e proton.LinkEvent) (ChangeKind, bool) {
+	switch e.EventType {
+	case proton.LinkEventDelete:
+		return ChangeDelete, true
+
+	case proton.LinkEventCreate, proton.LinkEventUpdate, proton.LinkEventUpdateMetadata:
+		// Trashing arrives as an Update, not a Delete, so the state still has
+		// to be inspected or a trashed file would sit on disk forever.
+		if e.Link.State == proton.LinkStateTrashed || e.Link.State == proton.LinkStateDeleted {
+			return ChangeDelete, true
+		}
+		return ChangeUpsert, true
+	}
+	return 0, false
 }

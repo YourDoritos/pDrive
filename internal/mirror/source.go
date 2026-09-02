@@ -31,6 +31,8 @@ type Source interface {
 	Walk(ctx context.Context, fn drive.WalkFunc) error
 	// ListDir lists exactly one directory.
 	ListDir(ctx context.Context, linkID, prefix string) ([]drive.Node, error)
+	// LinkParent resolves a node's parent, for events that omit it.
+	LinkParent(ctx context.Context, linkID string) (string, error)
 
 	// Download opens a file's active revision for reading.
 	Download(ctx context.Context, linkID string) (io.ReadCloser, int64, error)

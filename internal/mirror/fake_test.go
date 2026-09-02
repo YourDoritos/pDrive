@@ -247,3 +247,12 @@ func (f *fakeDrive) has(path string) bool {
 	_, ok := f.files[path]
 	return ok
 }
+
+func (f *fakeDrive) LinkParent(_ context.Context, linkID string) (string, error) {
+	for _, n := range f.files {
+		if n.linkID == linkID {
+			return n.parentID, nil
+		}
+	}
+	return "", fmt.Errorf("no such link %s", linkID)
+}
