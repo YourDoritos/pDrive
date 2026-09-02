@@ -77,7 +77,25 @@ pdrive get <path>        # fetch a file left as a stub
 pdrive status            # what the mirror holds (offline)
 ```
 
-Still download-only — nothing writes to your account.
+**Phase 2 — bidirectional.** Uploads, conflict copies that never discard
+either version, move detection, and local deletions propagated to Proton's
+trash. Includes a port of Proton's per-block upload verification, which has
+been missing from every Go client since September 2025.
+
+**Phase 3 — daemon and gate.** `pdrived` keeps the session warm and syncs on
+inotify, on a timer, and on resume from suspend. `pdrive-gate` optionally makes
+directory listings wait until they are current.
+
+```bash
+make install                         # ~/.local/bin + user systemd unit
+systemctl --user enable --now pdrived
+loginctl enable-linger $USER         # keep syncing when logged out
+
+sudo make install-gate               # optional, needs root
+sudo systemctl enable --now pdrive-gate
+
+pdrivectl status --short             # one line, for waybar/tmux
+```
 
 See [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md) for the full design and the
 phase plan.

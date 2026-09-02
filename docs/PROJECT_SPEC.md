@@ -654,13 +654,56 @@ instant.
 
 **Done when:** two machines converge under concurrent edits and nothing is ever lost.
 
-### Phase 3 - Daemon + gate
-Split `pdrived` / `pDrive` / `pdrivectl`; `systemd --user` + linger. Build `pdrive-gate`:
-fanotify marks over the tree, gate protocol, deadline, self-exclusion, fail-open, system unit.
-Fallback tier (inotify + adaptive cadence) for gate-less installs. `pdrivectl status` in
-waybar/tmux format for your Hyprland bar.
-**Done when:** a file added on machine A shows up in the *first* `ls` on machine B, and
-`systemctl stop pdrive-gate` degrades to the fallback without a hiccup.
+### Phase 3 - Daemon + gate — DONE
+
+Four binaries: `pdrive` (TUI + one-shot CLI), `pdrived` (user daemon), `pdrivectl`
+(scriptable), `pdrive-gate` (root, optional). systemd units for the user daemon and the
+system gate.
+
+**Measured on the live account:**
+
+| | |
+|---|---|
+| File dropped in the folder, no command issued | uploaded 4 s later, by inotify + debounce |
+| `pdrive sync` routed through the warm daemon | 281-618 ms |
+| The same work standalone (cold bootstrap) | 525-1691 ms |
+| `ls` with the gate active, needing a refresh | 305 ms |
+| `ls` with the gate active, already fresh | 2 ms |
+| `SIGKILL pdrive-gate`, then `ls` | 1-2 ms, exit 0 — kernel fails open, daemon falls back to polling |
+
+`pdrivectl status` reports which freshness tier is in effect, and `--short` prints one line
+for a status bar.
+
+**Still to verify with a second machine:** "a file added on machine A shows up in the *first*
+`ls` on machine B". Every component is proven separately — the kernel behaviour in Phase 0,
+the event path in Phase 1, and the gate holding a listing while the daemon refreshes here —
+but the end-to-end claim needs two devices.
+
+#### Gate design as built
+
+`pdrived` connects *out* to the gate and registers its sync root and pid; the gate then uses
+that connection to ask about each held listing. The gate therefore needs no prior knowledge of
+users or socket locations, and a daemon that dies takes its marks with it.
+
+**Authorisation is by peer credentials.** The gate socket must be world-writable, because any
+user's daemon has to be able to register its own folder. `SO_PEERCRED` gives the caller's uid,
+and the requested root must be owned by that uid. Without this, any local user could ask a root
+process to intercept opens in someone else's directories and stall them. A file mode cannot
+express that constraint; peer credentials can.
+
+**Self-deadlock avoidance.** The daemon reports its pid at registration and the gate allows
+that pid's opens without asking. The daemon writes into the very tree it is asked about, so
+without this it would block waiting for itself.
+
+**New directories.** Marks are per-inode, so a folder created after registration is invisible
+to the gate. The daemon sends a rescan after any sync that created folders and after local
+changes. Without it the freshness guarantee would hold everywhere except the folders most
+likely to have just changed.
+
+#### Deferred
+
+`FAN_PRE_ACCESS` placeholders remain Phase 5. The gate marks the whole tree at registration
+and on rescan; a very large tree would be better served by marking lazily.
 
 ### Phase 4 - Polish & ship
 Bandwidth limits, parallel transfers, selective sync, `.pdriveignore`. Conflict browser +
