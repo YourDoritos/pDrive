@@ -12,6 +12,7 @@ import (
 
 	"github.com/YourDoritos/pdrive/internal/config"
 	"github.com/YourDoritos/pdrive/internal/drive"
+	"github.com/YourDoritos/pdrive/internal/ipc"
 	"github.com/YourDoritos/pdrive/internal/mirror"
 	"github.com/YourDoritos/pdrive/internal/state"
 )
@@ -35,6 +36,13 @@ func cmdSync(args []string) error {
 	defer stop()
 
 	started := time.Now()
+
+	// Prefer the daemon when it is running. It already holds an open Drive
+	// session and a warm connection, so it skips the six bootstrap API calls
+	// a cold invocation pays — the difference between roughly 0.5s and 2s.
+	if !*timing && ipc.Available(config.SocketPath()) {
+		return syncViaDaemon(*full, *downOnly, *confirm, started)
+	}
 
 	m, db, d, err := openMirror(ctx, mirror.Options{
 		ConfirmDeletions: *confirm,
@@ -128,6 +136,43 @@ func printTiming(m drive.MetricsSnapshot, total time.Duration) {
 	perChange := m.EventTime + m.ListTime + m.AttrTime
 	fmt.Printf("  %-22s %8s  (event + list + attrs, excludes startup and downloads)\n",
 		"gate-relevant cost", perChange.Round(time.Millisecond))
+}
+
+// syncViaDaemon runs the pass in pdrived, which already has a warm session.
+func syncViaDaemon(full, downOnly, confirm bool, started time.Time) error {
+	c, err := ipc.Dial(config.SocketPath())
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Syncing %s (via pdrived)\n\n", cfg.SyncRoot())
+
+	res, err := c.Sync(ipc.SyncParams{
+		Full: full, DownOnly: downOnly, ConfirmDeletions: confirm,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Done in %s.\n", time.Since(started).Round(time.Millisecond))
+	fmt.Printf("  down: %d downloaded (%s), %d stubbed, %d removed\n",
+		res.Downloaded, humanBytes(res.Bytes), res.Stubbed, res.Deleted)
+	if res.Uploaded > 0 || res.Moved > 0 || res.TrashedRemote > 0 {
+		fmt.Printf("  up:   %d uploaded (%s), %d moved, %d trashed\n",
+			res.Uploaded, humanBytes(res.UploadedBytes), res.Moved, res.TrashedRemote)
+	}
+	if res.Conflicts > 0 {
+		fmt.Printf("  %d conflict(s) — both versions kept; see `pdrive conflicts`\n", res.Conflicts)
+	}
+	if res.Warnings > 0 {
+		fmt.Printf("  %d warning(s)\n", res.Warnings)
+	}
+	return nil
 }
 
 // cmdGet downloads a file that was left as a stub by the size cap.

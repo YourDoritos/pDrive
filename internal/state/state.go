@@ -441,3 +441,13 @@ func (s *DB) Conflicts() ([]Conflict, error) {
 	}
 	return out, rows.Err()
 }
+
+// DeleteConflict removes a conflict record.
+func (s *DB) DeleteConflict(path, keptLocal string) error {
+	_, err := s.db.Exec(`DELETE FROM conflicts WHERE path = ? AND kept_local = ?`,
+		path, keptLocal)
+	if err != nil {
+		return fmt.Errorf("delete conflict for %q: %w", path, err)
+	}
+	return nil
+}

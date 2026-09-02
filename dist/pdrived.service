@@ -1,0 +1,30 @@
+[Unit]
+Description=pDrive sync daemon (unofficial Proton Drive client)
+Documentation=https://github.com/YourDoritos/pDrive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pdrived
+Restart=on-failure
+RestartSec=5s
+
+# Runs as your user; nothing here needs privilege. The only component that
+# does is pdrive-gate, which is separate and optional.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-write
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=default.target

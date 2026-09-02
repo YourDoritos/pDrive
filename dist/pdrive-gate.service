@@ -1,0 +1,35 @@
+[Unit]
+Description=pDrive listing gate (blocking freshness for Proton Drive)
+Documentation=https://github.com/YourDoritos/pDrive
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pdrive-gate
+Restart=on-failure
+RestartSec=5s
+
+# fanotify permission events require CAP_SYS_ADMIN, which is the entire
+# reason this is a separate process from the daemon. It is granted that and
+# nothing else: no network namespace access, no write access to the system,
+# and a syscall filter.
+#
+# Stopping this unit is always safe. The kernel releases every held listing
+# when the descriptor closes, and pDrive falls back to polling.
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RuntimeDirectory=pdrive-gate
+
+[Install]
+WantedBy=multi-user.target
