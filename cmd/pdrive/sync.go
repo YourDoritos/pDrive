@@ -32,15 +32,26 @@ func cmdSync(args []string) error {
 		return err
 	}
 
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	started := time.Now()
 
-	// Prefer the daemon when it is running. It already holds an open Drive
-	// session and a warm connection, so it skips the six bootstrap API calls
-	// a cold invocation pays — the difference between roughly 0.5s and 2s.
-	if !*timing && ipc.Available(config.SocketPath()) {
+	// Prefer the daemon when it is running: it holds an open Drive session
+	// and a warm connection, so it skips the six bootstrap API calls a cold
+	// invocation pays.
+	//
+	// Only when it is syncing the same folder, though. The socket lives in
+	// $XDG_RUNTIME_DIR, which does not move when someone points
+	// XDG_CONFIG_HOME at a different configuration — so delegating blindly
+	// meant `pdrive sync` could report on, and act on, a folder the caller
+	// never asked about.
+	if !*timing && daemonServes(cfg.SyncRoot()) {
 		return syncViaDaemon(*full, *downOnly, *confirm, started)
 	}
 
@@ -54,10 +65,6 @@ func cmdSync(args []string) error {
 	defer db.Close()
 	defer d.Close()
 
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
 	fmt.Printf("Syncing %s\n\n", cfg.SyncRoot())
 
 	var res *mirror.Result
@@ -136,6 +143,21 @@ func printTiming(m drive.MetricsSnapshot, total time.Duration) {
 	perChange := m.EventTime + m.ListTime + m.AttrTime
 	fmt.Printf("  %-22s %8s  (event + list + attrs, excludes startup and downloads)\n",
 		"gate-relevant cost", perChange.Round(time.Millisecond))
+}
+
+// daemonServes reports whether a running daemon is syncing this exact folder.
+func daemonServes(root string) bool {
+	c, err := ipc.Dial(config.SocketPath())
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+
+	st, err := c.Status()
+	if err != nil {
+		return false
+	}
+	return st.Root == root
 }
 
 // syncViaDaemon runs the pass in pdrived, which already has a warm session.

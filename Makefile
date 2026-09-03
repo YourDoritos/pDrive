@@ -51,6 +51,14 @@ install: build
 	sed 's|^ExecStart=.*|ExecStart=$(BINDIR)/pdrived|' dist/pdrived.service \
 		| install -Dm644 /dev/stdin $(DESTDIR)$(USERUNITDIR)/pdrived.service
 	@echo
+	@if [ -x "$(GATE_BINDIR)/pdrive-gate" ]; then \
+		echo; \
+		echo "NOTE: pdrive-gate is installed at $(GATE_BINDIR)/pdrive-gate and was"; \
+		echo "      NOT updated by this target. It talks a versioned protocol with"; \
+		echo "      pdrived, so update it too:"; \
+		echo "          sudo make install-gate && sudo systemctl restart pdrive-gate"; \
+	fi
+	@echo
 	@echo "Installed. Start the daemon with:"
 	@echo "    systemctl --user daemon-reload"
 	@echo "    systemctl --user enable --now pdrived"

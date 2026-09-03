@@ -60,6 +60,29 @@ FAN_ONDIR)` on a directory:
 Those two last rows are what make this acceptable: the tax on a listing with nothing to do is
 ~70 microseconds, and a dead daemon cannot wedge the filesystem.
 
+### Measured: what a held listing actually costs
+
+Verified against a live account with a second machine uploading:
+
+| | |
+|---|---|
+| Nothing changed (the common case) | **~300 ms** |
+| A small file to fetch | **1.3 - 1.7 s** |
+
+The second number is the one that matters, and it is why `max_block_ms`
+defaults to **2000**. At 900 ms the listing was released mid-download: the file
+did not appear, and — because a cancelled transfer was being reported as a
+per-file warning rather than as the pass running out of time — the refresh
+logged as a success that simply found nothing. Three separate symptoms, one
+budget that was too small.
+
+A held listing asks Proton about **the directory being opened**, not the event
+cursor. Proton publishes a volume event one to three seconds after an upload,
+so a listing held immediately afterwards polls the cursor and correctly finds
+nothing. Listing the one directory sidesteps that entirely: a single
+non-recursive read, on an explicit user action, rate-limited by
+`fresh_window` — the same request the web client makes when you open a folder.
+
 ### The rule that keeps the block bounded: metadata only
 
 **The block never waits on file content.** During a held `OPEN_PERM` we do exactly one thing:
@@ -673,7 +696,8 @@ system gate.
 | File dropped in the folder, no command issued | uploaded 4 s later, by inotify + debounce |
 | `pdrive sync` routed through the warm daemon | 281-618 ms |
 | The same work standalone (cold bootstrap) | 525-1691 ms |
-| `ls` with the gate active, needing a refresh | 305 ms |
+| `ls` with the gate active, nothing changed | ~300 ms |
+| `ls` with the gate active, fetching a small file | 1.3 - 1.7 s |
 | `ls` with the gate active, already fresh | 2 ms |
 | `SIGKILL pdrive-gate`, then `ls` | 1-2 ms, exit 0 — kernel fails open, daemon falls back to polling |
 

@@ -4,10 +4,11 @@ import (
 	"context"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/YourDoritos/pdrive/internal/gate"
-	"github.com/YourDoritos/pdrive/internal/ipc"
 	"github.com/YourDoritos/pdrive/internal/mirror"
 )
 
@@ -69,6 +70,10 @@ func (d *Daemon) runGateSession(ctx context.Context) bool {
 		Type: gate.TypeRegister,
 		Root: d.cfg.SyncRoot(),
 		PID:  os.Getpid(),
+		// One source of truth for the budget. If the gate released earlier
+		// than this, the refresh would be cancelled mid-request and the
+		// listing would be neither fresh nor blocked.
+		DeadlineMS: d.cfg.Freshness.MaxBlockMS,
 	}); err != nil {
 		return false
 	}
@@ -102,47 +107,98 @@ func (d *Daemon) runGateSession(ctx context.Context) bool {
 		}
 		// Answer on its own goroutine: several listings can be held at once,
 		// and one slow answer must not delay the others.
-		go func(id uint64) {
-			d.refreshForListing(ctx)
+		go func(id uint64, path string) {
+			d.refreshForListing(ctx, path)
 			_ = conn.Send(&gate.Message{Type: gate.TypeAck, ID: id})
-		}(msg.ID)
+		}(msg.ID, msg.Path)
 	}
 }
 
 // refreshForListing brings the tree up to date for a held directory listing.
 //
-// Two things keep this inside the gate's budget. First, a recent poll is
-// enough: inside fresh_window the answer is already known and no request is
-// made at all, which is what stops `ls` in a loop from hammering the API.
-// Second, this runs the pull half only. A full bidirectional pass would scan
-// and hash the local tree, and a listing must never wait on that.
-func (d *Daemon) refreshForListing(ctx context.Context) {
-	if d.Fresh() || d.IsPaused() {
+// The freshness window here is deliberately short. It exists only to collapse
+// a burst of listings — a file manager opening the same folder several times,
+// or `ls` in a loop — into one API call. Set long, it defeats the entire
+// point of the gate: a file uploaded a second ago on another device would be
+// answered from cache and missed by the very listing that was blocked to
+// catch it.
+//
+// Concurrent listings share one pass rather than each starting their own.
+func (d *Daemon) refreshForListing(ctx context.Context, openedPath string) {
+	if d.IsPaused() {
+		return
+	}
+	if d.Fresh() {
 		return
 	}
 
-	// Bounded well inside the gate's own deadline: if this cannot finish in
-	// time the gate releases the listing anyway, and a request still in
-	// flight would only waste work.
+	// Single-flight: several directories are often opened at once, and one
+	// pass covers all of them.
+	d.listingMu.Lock()
+	if d.listingRun != nil {
+		wait := d.listingRun
+		d.listingMu.Unlock()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+		}
+		return
+	}
+	done := make(chan struct{})
+	d.listingRun = done
+	d.listingMu.Unlock()
+
+	defer func() {
+		d.listingMu.Lock()
+		d.listingRun = nil
+		d.listingMu.Unlock()
+		close(done)
+	}()
+
+	// Bounded by the gate's own deadline: past that the listing is released
+	// anyway, and work still in flight would only be wasted.
+	// Slightly under the gate's hold, so a refresh that is nearly done is not
+	// cancelled by its own deadline at the same instant.
 	budget := time.Duration(d.cfg.Freshness.MaxBlockMS) * time.Millisecond
+	budget -= budget / 10
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	m, err := mirror.New(d.drive, d.db, mirror.Options{
-		Config: d.cfg,
-		Progress: func(ev mirror.Event) {
-			d.publish(ipc.EventActivity, ipc.ActivityData{
-				Kind: activityKind(ev.Kind), Path: ev.Path, Size: ev.Size,
-			})
-		},
+		Config:   d.cfg,
+		Progress: d.onMirrorEvent,
 	})
 	if err != nil {
 		return
 	}
 
-	if _, err := m.Sync(ctx); err != nil {
-		d.log.Debugf("listing refresh: %v", err)
+	started := time.Now()
+
+	// Ask about the directory actually being opened. Polling the event cursor
+	// instead would miss a file uploaded moments ago, because Proton has not
+	// published its event yet.
+	rel, ok := d.relativeTo(openedPath)
+	var refreshErr error
+	if ok {
+		refreshErr = m.RefreshDir(ctx, rel)
+	} else {
+		_, refreshErr = m.Sync(ctx)
+	}
+	res := m.LastResult()
+	elapsed := time.Since(started)
+	if refreshErr != nil {
+		d.log.Debugf("listing refresh failed after %s: %v",
+			elapsed.Round(time.Millisecond), refreshErr)
 		return
+	}
+	// Logged at info when it actually did something: this is the number the
+	// hold budget has to cover, and it is the only way to tell a budget that
+	// is too small from a sync that is simply slow.
+	if res.Downloaded > 0 || res.Deleted > 0 {
+		d.log.Infof("listing refresh took %s (%d down, %d removed)",
+			elapsed.Round(time.Millisecond), res.Downloaded, res.Deleted)
+	} else {
+		d.log.Debugf("listing refresh took %s", elapsed.Round(time.Millisecond))
 	}
 
 	d.mu.Lock()
@@ -168,4 +224,21 @@ func (d *Daemon) GateRescan() {
 	if err := conn.Send(&gate.Message{Type: gate.TypeRescan}); err != nil {
 		d.log.Debugf("gate rescan: %v", err)
 	}
+}
+
+// relativeTo converts an absolute path inside the sync folder to the
+// slash-separated form the state database uses.
+func (d *Daemon) relativeTo(abs string) (string, bool) {
+	if abs == "" {
+		return "", false
+	}
+	root := d.cfg.SyncRoot()
+	if abs == root {
+		return "", true
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }

@@ -378,6 +378,12 @@ func (m *Mirror) relistDir(ctx context.Context, linkID string) error {
 		}
 		seen[n.Path] = true
 		if err := m.applyNode(ctx, n); err != nil {
+			// Cancellation is not a per-file problem: the pass ran out of
+			// time. Swallowing it as a warning made a truncated refresh look
+			// like a successful one that simply found nothing.
+			if ctx.Err() != nil {
+				return err
+			}
 			m.emit(Event{Kind: EventWarn, Path: n.Path, Err: err})
 		}
 	}
@@ -471,7 +477,7 @@ func (m *Mirror) applyNode(ctx context.Context, n drive.Node) error {
 
 	// Stage first. Holding both versions at once turns conflict detection
 	// into an exact hash comparison instead of an inference from metadata.
-	tmp, sum, written, err := stageDownload(local, src)
+	tmp, sum, written, err := stageDownload(m.root, local, src)
 	if err != nil {
 		return err
 	}
@@ -583,7 +589,7 @@ func (m *Mirror) Materialize(ctx context.Context, path string) error {
 	defer rc.Close()
 
 	src := m.trackTransfer(path, node.Size, false, rc)
-	tmp, sum, written, err := stageDownload(local, src)
+	tmp, sum, written, err := stageDownload(m.root, local, src)
 	m.endTransfer(path, false)
 	if err != nil {
 		return err
@@ -716,3 +722,57 @@ func (m *Mirror) trackTransfer(path string, size int64, up bool, r io.Reader) io
 func (m *Mirror) endTransfer(path string, up bool) {
 	m.emit(Event{Kind: EventTransferDone, Path: path, Up: up})
 }
+
+// RefreshDir brings one directory up to date by asking Proton about it
+// directly, rather than waiting for its event to arrive.
+//
+// The event stream lags an upload by one to three seconds, so a listing held
+// immediately after someone saved a file on another device polls the cursor
+// and correctly finds nothing — the change has happened but Proton has not
+// published it yet. Listing the one directory being opened sidesteps that.
+//
+// This is a single non-recursive read on an explicit user action, rate
+// limited by the freshness window, which is what the integration rules ask
+// for: it is the same request the web client makes when you open a folder.
+func (m *Mirror) RefreshDir(ctx context.Context, relPath string) error {
+	if err := m.checkRoot(); err != nil {
+		return err
+	}
+
+	linkID := m.d.RootLinkID()
+	if relPath != "" && relPath != "." {
+		node, err := m.db.GetNode(relPath)
+		if err != nil {
+			return err
+		}
+		if node == nil || !node.IsDir {
+			// Not a directory we track: fall back to the cursor, which will
+			// pick it up once the event lands.
+			return nil
+		}
+		linkID = node.NodeID
+	}
+
+	m.result = Result{}
+	// Local state matters here too: without it a download cannot tell an
+	// edited file from an untouched one and would overwrite local work.
+	local, err := m.Scan()
+	if err != nil {
+		return err
+	}
+	for path, n := range local {
+		base, err := m.db.GetNode(path)
+		if err != nil {
+			return err
+		}
+		if err := m.hashIfNeeded(n, base); err != nil {
+			m.emit(Event{Kind: EventWarn, Path: path, Err: err})
+		}
+	}
+	m.localBefore = local
+
+	return m.relistDir(ctx, linkID)
+}
+
+// LastResult returns the outcome of the most recent pass.
+func (m *Mirror) LastResult() Result { return m.result }

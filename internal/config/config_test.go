@@ -23,8 +23,14 @@ func TestDefaultsMatchSpec(t *testing.T) {
 	if !c.Freshness.Gate {
 		t.Error("gate should default to enabled")
 	}
-	if c.Freshness.MaxBlockMS != 400 {
-		t.Errorf("max_block_ms = %d, want 400", c.Freshness.MaxBlockMS)
+	if c.Freshness.MaxBlockMS != 2000 {
+		t.Errorf("max_block_ms = %d, want 2000", c.Freshness.MaxBlockMS)
+	}
+	// The freshness window only collapses a burst of listings. Long enough
+	// and the gate answers from cache a file that arrived moments ago.
+	if c.Freshness.FreshWindow.D() > time.Second {
+		t.Errorf("fresh_window = %v; longer than a second defeats the gate",
+			c.Freshness.FreshWindow.D())
 	}
 	if c.Sync.MaxAutoDownloadSize != 0 {
 		t.Errorf("max_auto_download_size = %d, want 0 (unlimited)", c.Sync.MaxAutoDownloadSize)
@@ -46,9 +52,9 @@ func TestValidateClampsRatherThanFailing(t *testing.T) {
 	if c.Sync.DeletionGuardPercent != 25 {
 		t.Errorf("guard = %d, want clamped to 25", c.Sync.DeletionGuardPercent)
 	}
-	// A listing may never be held longer than a second.
-	if c.Freshness.MaxBlockMS != 400 {
-		t.Errorf("max_block_ms = %d, want clamped to 400", c.Freshness.MaxBlockMS)
+	// A listing may never be held for an unbounded time.
+	if c.Freshness.MaxBlockMS != 2000 {
+		t.Errorf("max_block_ms = %d, want clamped to 2000", c.Freshness.MaxBlockMS)
 	}
 	if c.Limits.MaxParallelTransfers != 4 {
 		t.Errorf("parallel = %d, want 4", c.Limits.MaxParallelTransfers)
@@ -118,7 +124,7 @@ func TestLoadMissingReturnsValidatedDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if c.Freshness.MaxBlockMS != 400 || c.Sync.DeletionGuardPercent != 25 {
+	if c.Freshness.MaxBlockMS != 2000 || c.Sync.DeletionGuardPercent != 25 {
 		t.Error("missing config did not come back as validated defaults")
 	}
 }

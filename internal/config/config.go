@@ -103,9 +103,17 @@ func DefaultConfig() *Config {
 			MaxAutoDownloadSize:  0,
 		},
 		Freshness: FreshnessConfig{
-			Gate:           true,
-			MaxBlockMS:     400,
-			FreshWindow:    Duration(2 * time.Second),
+			Gate: true,
+			// A held listing has to cover a directory listing (~150-500 ms)
+			// and the download of whatever turned up. Measured against a
+			// live account, 900 ms cut small files off mid-download, and the
+			// listing was released without them. This is only ever paid when
+			// something actually changed.
+			MaxBlockMS: 2000,
+			// Only collapses a burst of listings into one API call. Longer
+			// and the gate answers from cache a file that arrived moments
+			// ago — missing it in the very listing it was blocked to catch.
+			FreshWindow:    Duration(400 * time.Millisecond),
 			IdleInterval:   Duration(60 * time.Second),
 			ActiveInterval: Duration(5 * time.Second),
 			ActiveWindow:   Duration(5 * time.Minute),
@@ -147,13 +155,13 @@ func (c *Config) Validate() {
 	if c.Sync.MaxAutoDownloadSize < 0 {
 		c.Sync.MaxAutoDownloadSize = 0
 	}
-	// A listing may never be held for longer than a second: past that the
-	// user notices, and freshness is not worth a visible stall.
-	if c.Freshness.MaxBlockMS < 1 || c.Freshness.MaxBlockMS > 1000 {
-		c.Freshness.MaxBlockMS = 400
+	// A listing may never be held for much longer than a second: past that
+	// the user notices, and freshness is not worth a visible stall.
+	if c.Freshness.MaxBlockMS < 1 || c.Freshness.MaxBlockMS > 3000 {
+		c.Freshness.MaxBlockMS = 2000
 	}
 	if c.Freshness.FreshWindow <= 0 {
-		c.Freshness.FreshWindow = Duration(2 * time.Second)
+		c.Freshness.FreshWindow = Duration(400 * time.Millisecond)
 	}
 	if c.Freshness.IdleInterval <= 0 {
 		c.Freshness.IdleInterval = Duration(60 * time.Second)

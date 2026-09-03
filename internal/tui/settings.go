@@ -106,7 +106,7 @@ var settingRows = []settingRow{
 			return fmt.Sprintf("%d ms", c.Freshness.MaxBlockMS)
 		},
 		cycle: func(c *config.Config) {
-			steps := []int{100, 200, 400, 700, 1000}
+			steps := []int{500, 1000, 2000, 3000}
 			c.Freshness.MaxBlockMS = nextInt(steps, c.Freshness.MaxBlockMS)
 		},
 	},

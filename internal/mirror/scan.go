@@ -28,7 +28,7 @@ type LocalNode struct {
 // browsers leave lying around. Uploading these produces conflicts and churn
 // and never anything the user wanted.
 var ignoredNames = []string{
-	".pdrive-tmp",
+	ScratchDir,
 	".DS_Store",
 	"Thumbs.db",
 }

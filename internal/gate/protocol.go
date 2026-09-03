@@ -39,6 +39,12 @@ type Message struct {
 	// Register
 	Root string `json:"root,omitempty"`
 	PID  int    `json:"pid,omitempty"`
+	// DeadlineMS is how long the daemon expects a listing may be held.
+	//
+	// Sent by the daemon because it owns the configuration. Set separately at
+	// each end they drift apart, and the gate releasing first cancels the
+	// refresh mid-request — the listing is then neither fresh nor blocked.
+	DeadlineMS int `json:"deadline_ms,omitempty"`
 
 	// Opened / Ack
 	ID   uint64 `json:"id,omitempty"`

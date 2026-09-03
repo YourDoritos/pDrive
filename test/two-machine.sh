@@ -47,7 +47,7 @@ note() { printf '  ---- %s\n' "$*"; }
 setup_machine() {
     local name=$1
     local base="$LAB/$name"
-    mkdir -p "$base"/{config/pdrive,state/pdrive,data,cache,files}
+    mkdir -p "$base"/{config/pdrive,state/pdrive,data,cache,files,run}
     # Shared auth, independent sync state.
     ln -sf "$REAL_SESSION" "$base/state/pdrive/session.enc"
     cat > "$base/config/pdrive/config.toml" <<EOF
@@ -60,10 +60,14 @@ EOF
 run() {
     local name=$1; shift
     local base="$LAB/$name"
+    # XDG_RUNTIME_DIR too: the daemon socket lives there, and without it a
+    # simulated machine connects to the real daemon and syncs the real
+    # folder instead of its own.
     XDG_CONFIG_HOME="$base/config" \
     XDG_STATE_HOME="$base/state" \
     XDG_DATA_HOME="$base/data" \
     XDG_CACHE_HOME="$base/cache" \
+    XDG_RUNTIME_DIR="$base/run" \
     "$PDRIVE" "$@" 2>&1
 }
 

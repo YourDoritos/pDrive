@@ -86,6 +86,11 @@ type Daemon struct {
 	// transfers is what is moving right now, keyed by path.
 	transfers map[string]*ipc.TransferData
 
+	// listingRun lets simultaneous held listings share one refresh instead of
+	// each starting a pass of its own.
+	listingMu  sync.Mutex
+	listingRun chan struct{}
+
 	// Account quota, cached. It changes slowly and costs an API call, so it
 	// is refreshed on a long interval rather than on every status request.
 	quotaUsed    int64

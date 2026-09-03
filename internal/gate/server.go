@@ -24,14 +24,16 @@ type Logger interface {
 
 // Server is pdrive-gate.
 type Server struct {
-	fan      *Fanotify
-	log      Logger
+	fan *Fanotify
+	log Logger
+	// deadline is the fallback; a registering daemon supplies its own.
 	deadline time.Duration
 
-	mu        sync.Mutex
-	client    *Conn
-	clientPID int
-	root      string
+	mu             sync.Mutex
+	client         *Conn
+	clientPID      int
+	root           string
+	clientDeadline time.Duration
 
 	nextID  atomic.Uint64
 	pending sync.Map // id -> chan struct{}
@@ -132,10 +134,21 @@ func (s *Server) handleClient(ctx context.Context, raw net.Conn) {
 		s.clientPID = pid
 	}
 	s.root = root
+	s.clientDeadline = s.deadline
+	if msg.DeadlineMS > 0 {
+		d := time.Duration(msg.DeadlineMS) * time.Millisecond
+		// Clamped: a daemon must not be able to stall listings indefinitely.
+		if d > 3*time.Second {
+			d = 3 * time.Second
+		}
+		s.clientDeadline = d
+	}
+	deadline := s.clientDeadline
 	s.mu.Unlock()
 
 	n, _ := s.fan.MarkTree(root)
-	s.log.Infof("watching %s for pid %d (%d directories marked)", root, s.clientPID, n)
+	s.log.Infof("watching %s for pid %d (%d directories, holding up to %s)",
+		root, s.clientPID, n, deadline)
 
 	defer func() {
 		// Fail open. With the daemon gone there is nobody to answer, so every
@@ -236,7 +249,12 @@ func (s *Server) decide(ev Event) {
 
 	s.mu.Lock()
 	client, daemonPID, root := s.client, s.clientPID, s.root
+	deadline := s.clientDeadline
 	s.mu.Unlock()
+
+	if deadline <= 0 {
+		deadline = s.deadline
+	}
 
 	if client == nil {
 		return // nobody to ask
@@ -263,7 +281,7 @@ func (s *Server) decide(ev Event) {
 	s.held.Add(1)
 	select {
 	case <-done:
-	case <-time.After(s.deadline):
+	case <-time.After(deadline):
 		// Proton latency must never become filesystem latency. The listing is
 		// released possibly one beat stale, which is exactly what the
 		// gate-less fallback would have given anyway.

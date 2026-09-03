@@ -620,3 +620,75 @@ func TestTrackedDeletionsStillTripTheGuard(t *testing.T) {
 		t.Fatal("a mass deletion of tracked nodes should still trip the guard")
 	}
 }
+
+// Regression: a partial download was staged beside its destination, so `ls`
+// during a transfer showed "report.pdf.pdrive-part" sitting in the folder.
+// Users reasonably read that as a broken sync.
+func TestPartialDownloadsAreNotVisible(t *testing.T) {
+	f := newFakeDrive()
+	f.addFileWithDigest("big.bin", strings.Repeat("x", 4096))
+
+	m, _, root := newTestMirror(t, f, nil)
+	mustSync(t, m)
+
+	// Nothing resembling scratch may be left in the folder.
+	var strays []string
+	filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(p, TempSuffix) {
+			rel, _ := filepath.Rel(root, p)
+			strays = append(strays, rel)
+		}
+		return nil
+	})
+	if len(strays) > 0 {
+		t.Errorf("scratch files left in the sync folder: %v", strays)
+	}
+
+	// Whatever scratch exists must be inside the hidden directory, which the
+	// scanner ignores and therefore never uploads.
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "pdrive-part") {
+			t.Errorf("%q is visible in the sync folder", e.Name())
+		}
+	}
+}
+
+// A failed download must leave nothing behind at all, visible or otherwise.
+func TestFailedDownloadLeavesNoScratch(t *testing.T) {
+	f := newFakeDrive()
+	f.addFileWithDigest("doomed.bin", "content")
+	f.failOn["link:doomed.bin"] = errors.New("network died")
+
+	m, _, root := newTestMirror(t, f, nil)
+	if _, err := m.FullMirror(context.Background()); err != nil {
+		t.Fatalf("one bad file should not fail the pass: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "doomed.bin")); !os.IsNotExist(err) {
+		t.Error("a failed download left a file at the destination")
+	}
+	entries, _ := os.ReadDir(root)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "pdrive-part") {
+			t.Errorf("a failed download left %q behind", e.Name())
+		}
+	}
+}
+
+// The scratch directory must never be uploaded, or in-progress downloads
+// would round-trip into the account.
+func TestScratchDirectoryIsNeverSynced(t *testing.T) {
+	if !Ignored(ScratchDir) {
+		t.Fatalf("%q is not ignored by the scanner", ScratchDir)
+	}
+	if validPath(ScratchDir + "/dl-123" + TempSuffix) {
+		t.Error("a scratch path passed validation")
+	}
+}

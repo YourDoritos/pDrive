@@ -23,26 +23,41 @@ import (
 const StubSuffix = ".pdrive-stub"
 
 // TempSuffix marks an in-progress download.
+//
+// Only used for naming inside ScratchDir; a partial download never sits beside
+// its destination, where the user would see it in a listing.
 const TempSuffix = ".pdrive-part"
 
-// stageDownload streams r into a temporary file beside its destination and
-// returns the temp path, the content's SHA1 and the byte count.
+// ScratchDir holds in-progress downloads. It lives inside the sync folder so
+// the final rename stays on one filesystem and therefore atomic, and it is
+// ignored by the scanner and hidden from listings.
+const ScratchDir = ".pdrive-tmp"
+
+// stageDownload streams r into a scratch file and returns its path, the
+// content's SHA1 and the byte count.
 //
 // Staging before deciding anything is what makes conflict detection exact: we
 // end up holding the incoming content and the existing local file at the same
 // time, so "did this actually change?" is a hash comparison rather than an
 // inference from metadata we may not have. It also means a crash mid-download
 // can never leave a truncated file at the real path.
-func stageDownload(path string, r io.Reader) (string, string, int64, error) {
+func stageDownload(root, path string, r io.Reader) (string, string, int64, error) {
+	scratch := filepath.Join(root, ScratchDir)
+	if err := os.MkdirAll(scratch, 0700); err != nil {
+		return "", "", 0, fmt.Errorf("create scratch directory: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return "", "", 0, fmt.Errorf("create parent directory: %w", err)
 	}
 
-	tmp := path + TempSuffix
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	// A partial download must never be visible where the finished file will
+	// be. Users saw "report.pdf.pdrive-part" in `ls` and reasonably took it
+	// for a broken sync.
+	f, err := os.CreateTemp(scratch, "dl-*"+TempSuffix)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("create temp file: %w", err)
 	}
+	tmp := f.Name()
 
 	hasher := sha1.New()
 	written, err := io.Copy(io.MultiWriter(f, hasher), r)
@@ -57,6 +72,10 @@ func stageDownload(path string, r io.Reader) (string, string, int64, error) {
 		return "", "", 0, fmt.Errorf("sync: %w", err)
 	}
 	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return "", "", 0, err
+	}
+	if err := os.Chmod(tmp, 0600); err != nil {
 		os.Remove(tmp)
 		return "", "", 0, err
 	}
