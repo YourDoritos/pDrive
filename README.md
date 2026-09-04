@@ -2,99 +2,193 @@
 
 A **Proton Drive sync client for Linux** with a terminal UI. Written in Go.
 
-One folder — `~/pdrive` — synced both ways, continuously. Put a file in it and
-it is in the cloud. Add a file on another machine and it shows up here, without
-you asking.
+Daemon-based architecture — syncing continues when you close the TUI. One
+folder, `~/pdrive`, kept in both directions: put a file in it and it is in the
+cloud, change one elsewhere and it is here.
+
+Unlike the official Proton Drive CLI, pDrive:
+- **Actually syncs** — the official CLI has no sync engine by design, only
+  upload and download commands
+- **Can upload at all** — Proton's per-block verification has been missing
+  from every Go client, rclone included, since September 2025
+- **Shows a folder that is already current** — an optional root helper holds
+  `opendir(2)` for a moment so a listing is not stale
+- **Runs as a lightweight daemon** — no Electron, no Python, just Go binaries
 
 > **This is a third-party application not officially supported by Proton.**
 > pDrive is not affiliated with or endorsed by Proton AG.
 
-## Why
+## Screenshots
 
-Proton ships no Linux desktop client. The official `proton-drive` CLI has no
-sync engine — by design, "only the applications include a full synchronization
-engine that runs in the background." A GUI client was announced in June 2026
-for "before the end of 2026", with no beta and no date.
+<p align="center">
+  <img src="assets/tui-grid.png" alt="pDrive TUI — Status, Activity, Conflicts, Settings"/>
+</p>
 
-The working alternative today is `rclone bisync`, which is a scriptable file
-transfer tool rather than a sync daemon: no live freshness, no conflict copies,
-no move detection, no UI. Its upload path has also been broken since September
-2025 (see below).
+Everything the TUI does is also scriptable via `pdrivectl` — useful for
+waybar, tmux status bars, cron jobs, or just CI smoke tests:
 
-pDrive uses rclone's excellent Proton *libraries* but owns the sync engine, the
-state model, and the UX.
+```console
+$ pdrivectl status
+State        idle
+Account      you@proton.me
+Folder       /home/you/pdrive
+Synced       1284 files, 96 folders (41.0 GiB on disk)
+Drive        47.0 GiB of 500.0 GiB used (9.4%)
+New files    as soon as you open the folder
+Last sync    18s ago
+Uptime       3h12m
 
-## What makes it feel local
+$ pdrivectl status --short
+pDrive ✓ 1284 files 47.0 GiB
 
-Proton Drive offers no webhooks or push channel, so every third-party client
-polls. Polling means a stale window — the thing that makes cloud folders on
-Linux feel like cloud folders.
+$ pdrivectl watch
+watching /home/you/pdrive (daemon idle) — ctrl+c to stop
 
-pDrive removes it by intercepting the directory open. An optional root helper
-(`pdrive-gate`) holds `opendir(2)` via `fanotify` `FAN_OPEN_PERM` for a few
-hundred milliseconds while the daemon reconciles that directory, then releases
-it. The listing you get is the listing *after* the sync.
+18:12:32  download     Photos/coast.jpg  6.0 MiB
+18:12:34  upload       Notes/meeting.md  4.0 KiB
+```
 
-Measured on Linux 7.1.9:
+## Features
 
-| | |
-|---|---|
-| `ls` when the folder is already current | **2 ms** |
-| `ls` when it has to refresh first | **305 ms** |
-| Overhead of the gate with nothing to do | **+71 µs** |
-| Gate killed mid-listing | `ls` returns immediately, exit 0 |
-| File dropped in the folder | uploaded ~4 s later, no command needed |
+- Daemon + client architecture (syncing persists when the TUI closes)
+- Bidirectional sync with conflict copies — both versions are always kept
+- Move and rename detection (a renamed 4 GB file is moved, not re-uploaded)
+- Blocking directory listings via `fanotify`, so `ls` is never stale
+- Live transfer progress, and an activity log that survives restarts
+- Size cap with visible placeholders, fetched on demand
+- Modification times preserved in both directions
+- Deletions recoverable on both sides — Proton trash and a local trash
+- Verified offline backup with a `sha1sum(1)`-compatible manifest
+- Encrypted session, SRP login with TOTP and two-password accounts
+- Rate-limit aware: a Proton 429 parks *all* traffic rather than sustaining itself
 
-The hold never waits on file *content*, only on directory metadata, so a 5 GB
-video's name appears at once and the bytes stream in behind it.
+## Requirements
 
-The gate is optional. Without it, pDrive falls back to inotify hints plus
-adaptive polling and still works, just with a stale window on the first
-listing.
+**Required:**
+
+- Linux (any distribution) with `inotify` — used for local change detection
+- `systemd` (for the bundled user unit)
+- `x86_64` or `aarch64` for prebuilt binaries; other architectures can
+  [build from source](#build-from-source)
+- A Proton account with Drive
+
+**Required only for specific features:**
+
+- Linux kernel 5.1+ and `CAP_SYS_ADMIN` — only for `pdrive-gate`, the
+  optional helper that makes directory listings wait until they are current.
+  Everything else runs entirely as your own user.
 
 ## Install
+
+### Build from source
 
 ```bash
 git clone https://github.com/YourDoritos/pDrive.git
 cd pDrive
-
-make install                          # ~/.local/bin + user systemd unit
-systemctl --user daemon-reload
-systemctl --user enable --now pdrived
-loginctl enable-linger $USER          # keep syncing when logged out
-
-pdrive                                # log in, then the TUI takes over
+./install.sh
 ```
 
-Optionally, for listings that wait until they are current:
+This builds the binaries, installs them to `~/.local/bin`, and installs the
+`pdrived` user unit. Nothing here needs root.
 
 ```bash
-sudo make install-gate
+pdrive                                  # log in
+systemctl --user daemon-reload
+systemctl --user enable --now pdrived
+loginctl enable-linger "$USER"          # keep syncing when logged out
+```
+
+### AUR (Arch Linux)
+
+Not published yet. `dist/PKGBUILD` is in the repository and builds today:
+
+```bash
+cd dist && makepkg -si
+```
+
+### The listing gate (optional, needs root)
+
+Without it, pDrive checks for changes on a timer. With it, opening a folder
+waits until that folder is current.
+
+```bash
+./install.sh --with-gate
+# or, from an installed package:
 sudo systemctl enable --now pdrive-gate
 ```
 
-Nothing but `pdrive-gate` needs root.
+`pdrive-gate` never denies access to a file — it only ever delays a listing,
+and it fails open on every error path. Stopping it is always safe.
 
-## Use
+### Uninstall
 
-```
-pdrive                    terminal UI: status, activity, conflicts, settings
-pdrivectl status --short  one line, for waybar or tmux
-pdrivectl sync            run a pass now and wait for it
-pdrivectl pause / resume  stop and restart automatic syncing
-pdrivectl watch           follow sync activity as it happens
-pdrivectl conflicts       list preserved local copies
-pdrivectl get <path>      download a file left as a stub by the size cap
-pdrive backup             separate verified archive of the whole account
+```bash
+./uninstall.sh
 ```
 
-### Keys
+Your synced files, settings and local trash are left in place; your Proton
+Drive account is untouched.
 
-`1`–`4` switch tabs, `←`/`→` cycle them, `esc` returns to Status. `p` pauses,
-`r` refreshes, `q` quits.
+## Build
 
-`s` is contextual: sync now on most tabs, **save** on Settings, and **start the
-daemon** on Status when it is not running (`e` also enables it at login).
+```bash
+make build          # all four binaries into ./bin
+make test
+make fmtcheck
+make lint           # needs golangci-lint
+make screenshots    # regenerate the README images
+```
+
+## Usage
+
+```bash
+# Start the daemon (if not using systemd)
+pdrived -f
+
+# Open the TUI
+pdrive
+
+# Scriptable
+pdrivectl status --short      # one line, for a status bar
+pdrivectl sync                # run a pass now and wait for it
+pdrivectl watch               # follow activity as it happens
+pdrivectl pause / resume
+pdrivectl conflicts           # list preserved local copies
+pdrivectl get <path>          # download a file left as a placeholder
+pdrive backup                 # separate verified archive of the account
+```
+
+### Keybindings
+
+| Key | Action |
+|---|---|
+| `1` – `4` | Switch tab (Status, Activity, Conflicts, Settings) |
+| `←` `→` | Cycle tabs |
+| `esc` | Back to Status |
+| `s` | Sync now — or **save** on Settings, **start the daemon** when it is down |
+| `e` | Start the daemon and enable it at login (Status, when down) |
+| `p` | Pause / resume syncing |
+| `r` | Refresh |
+| `↑` `↓` `j` `k` | Move within a list |
+| `enter` | Change the selected setting |
+| `c` | Clear the activity log |
+| `q`, `ctrl+c` | Quit |
+
+### Settings
+
+Everything is editable in the Settings tab — the daemon picks changes up
+without a restart.
+
+| Setting | What it does |
+|---|---|
+| Sync folder | Where your files live. Changing it **moves** them, it does not download them again |
+| Size cap | Larger files are not downloaded until you ask for them |
+| Deletion guard | Stops a sync that would delete more of your files than this |
+| Trash retention | How long deleted files stay recoverable on this computer |
+| Blocking `ls` | Wait for new files to arrive before listing a folder |
+| Max hold | How long a listing may wait |
+| Upload / download limit | Bandwidth caps |
+| Parallel jobs | How many files transfer at once |
 
 ## Safety
 
@@ -105,8 +199,7 @@ A sync client's real job is not moving files, it is not losing them.
 - **Nothing is ever unlinked locally.** Remote deletions move the file to
   `~/.local/share/pdrive/trash/`.
 - **A conflict never discards either version.** The remote version keeps the
-  original name, yours is preserved beside it, and both are uploaded, so both
-  exist on every device.
+  original name, yours is preserved beside it, and both are uploaded.
 - **A pass that would delete a large share of your files is refused.**
 - **An empty sync folder with a populated database stops the sync** — that is
   far more often an unmounted disk than an intentional wipe.
@@ -115,79 +208,44 @@ A sync client's real job is not moving files, it is not losing them.
 - **Names from the server are validated, never trusted.** A file called
   `../../.bashrc` cannot escape the sync folder.
 
-`pdrive backup` makes a separate verified copy of the account with a
-`sha1sum(1)`-compatible manifest, so it can be checked without trusting pDrive:
+`pdrive backup` makes a separate verified copy with a manifest that standard
+tools can check, without trusting pDrive:
 
 ```bash
 pdrive backup && cd ~/pdrive-backup-* && sha1sum -c MANIFEST.sha1
 ```
 
-## Upload verification
+## How it works
 
-Proton's storage backend requires a per-block verification token in
-`POST /drive/blocks`. Without it every upload is rejected with *"You are using
-an outdated version of the app"*, which has left uploads broken in every Go
-client, rclone included, since September 2025.
+`pdrived` runs as a **user** systemd service and owns the sync loop (the
+state database, the Proton session, transfers, conflict handling). `pdrive`
+(TUI) and `pdrivectl` (CLI) are clients that talk to it over a Unix socket at
+`$XDG_RUNTIME_DIR/pdrive.sock`. Nothing in that path needs privilege.
 
-pDrive implements it, ported from Proton's own MIT-licensed SDK. See
-[`third_party/VENDOR.md`](third_party/VENDOR.md). The patch is upstreamable to
-rclone.
+1. Authenticates via Proton's SRP protocol, with TOTP and two-password support
+2. Derives the PGP key passphrase and unlocks the Drive key hierarchy
+3. Mirrors the account into the sync folder, recording a baseline in SQLite
+4. Follows Proton's volume event cursor for remote changes, and `inotify` for
+   local ones
+5. Reconciles three ways — local, remote, and the last state both agreed on
+6. Uploads in 4 MiB blocks, each carrying a per-block verification token
 
-## Paths
+`pdrive-gate` is separate and optional. It runs as root because `fanotify`
+permission events require `CAP_SYS_ADMIN`, holds `opendir(2)` on the sync
+folder for up to `max_block_ms`, and asks the daemon to bring that one
+directory up to date before releasing it. It performs no network I/O, holds
+no credentials, and authorises callers by peer credentials — the folder it is
+asked to watch must be owned by the uid that asked.
 
-| What | Where |
-|---|---|
-| Sync folder | `~/pdrive` |
-| Config | `~/.config/pdrive/config.toml` |
-| Session, state DB, log | `~/.local/state/pdrive/` |
-| Local trash | `~/.local/share/pdrive/trash/` |
+## Config
 
-Settings are editable in the TUI's Settings tab and the daemon picks them up
-without a restart. The sync folder can be changed there too: pDrive **moves**
-your files rather than downloading them again, stopping the daemon for the
-move and starting it afterwards.
+Stored in `~/.config/pdrive/config.toml`. Session data in
+`~/.local/state/pdrive/session.enc`, encrypted with a machine-id derived key.
+Sync state in `~/.local/state/pdrive/state.db`.
 
-## Security
-
-Proton offers no app passwords, service accounts, or scoped tokens, so an
-unattended sync daemon necessarily holds full-account credentials. pDrive
-stores its session encrypted at rest (Argon2id + XSalsa20-Poly1305, keyed from
-`/etc/machine-id`) with `0600` permissions — which protects against the file
-being copied elsewhere, not against someone who can already read your home
-directory.
-
-`pdrive-gate` runs as root because `fanotify` permission events require
-`CAP_SYS_ADMIN`. It is deliberately tiny: no network, no cryptography, no
-credentials. It never denies an open, only delays one, and fails open on every
-error path.
-
-See [SECURITY.md](SECURITY.md) for the full threat model.
-
-## Development
-
-```bash
-make build      # all four binaries into ./bin
-make test
-make fmtcheck
-make lint       # needs golangci-lint
-
-test/two-machine.sh   # two-device convergence test against a live account
-```
-
-[`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md) is the design document: the
-freshness mechanism and its measurements, the reconciler's rules, the eight
-safety guards, and the phase plan.
-
-## Status
-
-Working and in daily use, but pre-1.0 and moving quickly. Bidirectional sync,
-conflict handling, move detection, the daemon and the gate are all done and
-tested against a live account.
-
-Proton has announced a new Drive cryptographic model for end 2026 / early 2027;
-clients implementing only the previous one will stop interoperating until
-updated. All cryptography sits behind one package so that change lands in one
-place.
+See [SECURITY.md](SECURITY.md) for the threat model, and
+[docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) for the design: the freshness
+mechanism and its measurements, the reconciler's rules, and the safety guards.
 
 ## License
 

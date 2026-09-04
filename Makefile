@@ -18,7 +18,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 # diff against a new upstream release. See third_party/VENDOR.md.
 GOFILES := $(shell find . -name '*.go' -not -path './third_party/*')
 
-.PHONY: all build clean install install-gate uninstall uninstall-gate test lint fmt fmtcheck
+.PHONY: all build clean install install-gate uninstall uninstall-gate test lint fmt fmtcheck screenshots
 
 all: build
 
@@ -39,6 +39,12 @@ fmt:
 
 fmtcheck:
 	@out=$$(gofmt -l $(GOFILES)); if [ -n "$$out" ]; then echo "not gofmt-clean:"; echo "$$out"; exit 1; fi
+
+# Regenerates the README images from the current UI code. Needs rsvg-convert
+# and ImageMagick; only ever run by hand, never by CI.
+screenshots:
+	go run ./tools/screenshot -out assets
+	./tools/screenshot/compose.sh assets
 
 clean:
 	rm -rf bin/

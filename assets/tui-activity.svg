@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="817" height="506" viewBox="0 0 817 506" font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace" font-size="14.0">
+<rect x="0" y="0" width="817" height="506" rx="10" fill="#14141f"/>
+<rect x="0" y="0" width="817" height="28" rx="10" fill="#1d1d2b"/>
+<rect x="0" y="10" width="817" height="18" fill="#1d1d2b"/>
+<circle cx="18.0" cy="14.0" r="5" fill="#ff5f57"/>
+<circle cx="36.0" cy="14.0" r="5" fill="#febc2e"/>
+<circle cx="54.0" cy="14.0" r="5" fill="#28c840"/>
+<text x="408.4" y="18.0" fill="#8a8a9a" font-size="12" text-anchor="middle">pdrive — activity</text>
+<text x="106.00" y="58.00" fill="#3c3c5c" xml:space="preserve">╭──────────╮</text>
+<text x="206.80" y="58.00" fill="#00f0c8" xml:space="preserve">╭────────────╮</text>
+<text x="324.40" y="58.00" fill="#3c3c5c" xml:space="preserve">╭─────────────────╮╭────────────╮</text>
+<text x="30.40" y="76.00" fill="#6d49ff" font-weight="bold" xml:space="preserve">pDrive</text>
+<text x="106.00" y="76.00" fill="#3c3c5c" xml:space="preserve">│</text>
+<text x="122.80" y="76.00" fill="#888899" xml:space="preserve">1 Status</text>
+<text x="198.40" y="76.00" fill="#3c3c5c" xml:space="preserve">│</text>
+<text x="206.80" y="76.00" fill="#00f0c8" xml:space="preserve">│</text>
+<text x="223.60" y="76.00" fill="#e8e8e8" font-weight="bold" xml:space="preserve">2 Activity</text>
+<text x="316.00" y="76.00" fill="#00f0c8" xml:space="preserve">│</text>
+<text x="324.40" y="76.00" fill="#3c3c5c" xml:space="preserve">│</text>
+<text x="341.20" y="76.00" fill="#888899" xml:space="preserve">3 Conflicts (1)</text>
+<text x="475.60" y="76.00" fill="#3c3c5c" xml:space="preserve">││</text>
+<text x="500.80" y="76.00" fill="#888899" xml:space="preserve">4 Settings</text>
+<text x="593.20" y="76.00" fill="#3c3c5c" xml:space="preserve">│</text>
+<text x="106.00" y="94.00" fill="#3c3c5c" xml:space="preserve">╰──────────╯</text>
+<text x="206.80" y="94.00" fill="#00f0c8" xml:space="preserve">╰────────────╯</text>
+<text x="324.40" y="94.00" fill="#3c3c5c" xml:space="preserve">╰─────────────────╯╰────────────╯</text>
+<text x="97.60" y="130.00" fill="#6d49ff" xml:space="preserve">╭────────────────────────────────────────────────────────────────────────╮</text>
+<text x="97.60" y="148.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="710.80" y="148.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="166.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="122.80" y="166.00" fill="#888899" xml:space="preserve">Transferring</text>
+<text x="710.80" y="166.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="184.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="710.80" y="184.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="202.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="139.60" y="202.00" fill="#00f0c8" font-weight="bold" xml:space="preserve">↓</text>
+<text x="148.00" y="202.00" fill="#e8e8e8" xml:space="preserve"> holiday.mov</text>
+<text x="341.20" y="202.00" fill="#2ecc71" xml:space="preserve">████</text>
+<text x="374.80" y="202.00" fill="#3c3c5c" xml:space="preserve">░░░░░░</text>
+<text x="442.00" y="202.00" fill="#888899" xml:space="preserve">1.7/4.0 GiB  52.8 MiB/s</text>
+<text x="710.80" y="202.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="220.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="139.60" y="220.00" fill="#8b6fff" xml:space="preserve">↑</text>
+<text x="148.00" y="220.00" fill="#e8e8e8" xml:space="preserve"> laptop.tar.zst</text>
+<text x="341.20" y="220.00" fill="#2ecc71" xml:space="preserve">██</text>
+<text x="358.00" y="220.00" fill="#3c3c5c" xml:space="preserve">░░░░░░░░</text>
+<text x="442.00" y="220.00" fill="#888899" xml:space="preserve">210.0/900.0 MiB  17.6 MiB/s</text>
+<text x="710.80" y="220.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="238.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="710.80" y="238.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="256.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="122.80" y="256.00" fill="#888899" xml:space="preserve">History (6)</text>
+<text x="710.80" y="256.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="274.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="710.80" y="274.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="292.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="122.80" y="292.00" fill="#888899" xml:space="preserve">  18:19:44</text>
+<text x="248.80" y="292.00" fill="#00f0c8" xml:space="preserve">download</text>
+<text x="332.80" y="292.00" fill="#e8e8e8" xml:space="preserve">Photos/coast.jpg</text>
+<text x="467.20" y="292.00" fill="#888899" xml:space="preserve">  6.0 MiB</text>
+<text x="710.80" y="292.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="310.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="122.80" y="310.00" fill="#888899" xml:space="preserve">  18:17:24</text>
+<text x="248.80" y="310.00" fill="#e74c3c" font-weight="bold" xml:space="preserve">CONFLICT</text>
+<text x="332.80" y="310.00" fill="#e8e8e8" xml:space="preserve">budget.ods</text>
+<text x="710.80" y="310.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="328.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="122.80" y="328.00" fill="#888899" xml:space="preserve">  18:14:24</text>
+<text x="248.80" y="328.00" fill="#f39c12" xml:space="preserve">trashed</text>
+<text x="332.80" y="328.00" fill="#e8e8e8" xml:space="preserve">scratch.tmp</text>
+<text x="710.80" y="328.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="346.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="122.80" y="346.00" fill="#888899" xml:space="preserve">  18:11:24</text>
+<text x="248.80" y="346.00" fill="#6d49ff" xml:space="preserve">move</text>
+<text x="332.80" y="346.00" fill="#e8e8e8" xml:space="preserve">draft.txt -&gt; Archive/draft.txt</text>
+<text x="710.80" y="346.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="364.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="122.80" y="364.00" fill="#888899" xml:space="preserve">  18:06:24</text>
+<text x="248.80" y="364.00" fill="#00f0c8" xml:space="preserve">download</text>
+<text x="332.80" y="364.00" fill="#e8e8e8" xml:space="preserve">Design/logo-v3.svg</text>
+<text x="484.00" y="364.00" fill="#888899" xml:space="preserve">  82.0 KiB</text>
+<text x="710.80" y="364.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="382.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="122.80" y="382.00" fill="#888899" xml:space="preserve">  17:58:24</text>
+<text x="248.80" y="382.00" fill="#8b6fff" xml:space="preserve">upload</text>
+<text x="332.80" y="382.00" fill="#e8e8e8" xml:space="preserve">Notes/meeting.md</text>
+<text x="467.20" y="382.00" fill="#888899" xml:space="preserve">  4.0 KiB</text>
+<text x="710.80" y="382.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="400.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="710.80" y="400.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="418.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="122.80" y="418.00" fill="#888899" xml:space="preserve">↑/↓ j/k: scroll  s: sync  c: clear  1-4: tabs  q: quit</text>
+<text x="710.80" y="418.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="436.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="710.80" y="436.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="97.60" y="454.00" fill="#6d49ff" xml:space="preserve">╰────────────────────────────────────────────────────────────────────────╯</text>
+</svg>

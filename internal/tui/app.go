@@ -728,6 +728,18 @@ func (a App) View() string {
 }
 
 func (a App) renderNav() string {
+	conflicts := 0
+	if a.status.status != nil {
+		conflicts = a.status.status.Conflicts
+	}
+	return RenderNav(a.width, a.view, conflicts)
+}
+
+// RenderNav draws the tab bar.
+//
+// Exported so the screenshot tool composes exactly what a user sees, rather
+// than a second copy of it that can drift.
+func RenderNav(width int, active View, conflicts int) string {
 	brand := lipgloss.NewStyle().
 		Bold(true).Foreground(ColorPrimary).Padding(0, 1).Render("pDrive")
 
@@ -741,10 +753,10 @@ func (a App) renderNav() string {
 		{"4", "Settings", ViewSettings},
 	}
 
-	active := lipgloss.NewStyle().
+	activeTab := lipgloss.NewStyle().
 		Foreground(ColorFg).Bold(true).Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).BorderForeground(ColorAccent)
-	inactive := lipgloss.NewStyle().
+	inactiveTab := lipgloss.NewStyle().
 		Foreground(ColorFgDim).Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).BorderForeground(ColorBorder)
 
@@ -753,18 +765,18 @@ func (a App) renderNav() string {
 		label := fmt.Sprintf("%s %s", t.key, t.label)
 		// A conflict is the one thing the user must not miss, so the tab
 		// carries the count wherever they happen to be.
-		if t.view == ViewConflicts && a.status.status != nil && a.status.status.Conflicts > 0 {
-			label = fmt.Sprintf("%s %s (%d)", t.key, t.label, a.status.status.Conflicts)
+		if t.view == ViewConflicts && conflicts > 0 {
+			label = fmt.Sprintf("%s %s (%d)", t.key, t.label, conflicts)
 		}
-		if a.view == t.view {
-			parts = append(parts, active.Render(label))
+		if active == t.view {
+			parts = append(parts, activeTab.Render(label))
 		} else {
-			parts = append(parts, inactive.Render(label))
+			parts = append(parts, inactiveTab.Render(label))
 		}
 	}
 
 	bar := lipgloss.JoinHorizontal(lipgloss.Center, parts...)
-	return lipgloss.NewStyle().Width(a.width).Render(
+	return lipgloss.NewStyle().Width(width).Render(
 		lipgloss.JoinHorizontal(lipgloss.Center, brand, "  ", bar))
 }
 

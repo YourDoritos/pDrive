@@ -171,10 +171,14 @@ func cmdStatus(args []string) error {
 	if st.Conflicts > 0 {
 		fmt.Printf("Conflicts    %d — `pdrivectl conflicts`\n", st.Conflicts)
 	}
+	// Same wording as the TUI: what the user gets, not which component is up.
 	if st.GateActive {
-		fmt.Printf("Freshness    gate active (listings block until current)\n")
+		fmt.Printf("New files    as soon as you open the folder\n")
 	} else {
-		fmt.Printf("Freshness    polling (pdrive-gate not connected)\n")
+		fmt.Printf("New files    checked periodically\n")
+	}
+	if st.RateLimitedFor > 0 {
+		fmt.Printf("Rate limit   Proton asked us to slow down (%ds left)\n", st.RateLimitedFor)
 	}
 	fmt.Printf("Last sync    %s\n", relTime(st.LastSync))
 	fmt.Printf("Uptime       %s\n", orDash(st.Uptime))
