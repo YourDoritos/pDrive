@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"sync"
@@ -52,6 +53,13 @@ type Client struct {
 	httpClient *http.Client
 	baseURL    string
 
+	// refreshMu single-flights /auth/v4/refresh. Refresh tokens are
+	// single-use and rotate, so two concurrent refreshes race and the loser
+	// replays an already-spent token — which Proton reads as token reuse, a
+	// session-compromise signal, and counts hard against the auth limit.
+	refreshMu   sync.Mutex
+	lastRefresh time.Time
+
 	mu           sync.RWMutex
 	uid          string
 	accessToken  string
@@ -70,13 +78,15 @@ func NewClient(session *Session) *Client {
 		baseURL: DefaultBaseURL,
 		httpClient: &http.Client{
 			Timeout: DefaultTimeout,
-			Transport: &http.Transport{
+			// Through the shared limiter: a cooldown that only some of the
+			// traffic respects does not let the window close.
+			Transport: SharedLimiter.Transport(&http.Transport{
 				MaxIdleConns:          10,
 				IdleConnTimeout:       90 * time.Second,
 				TLSHandshakeTimeout:   10 * time.Second,
 				ExpectContinueTimeout: 1 * time.Second,
 				ForceAttemptHTTP2:     true,
-			},
+			}),
 		},
 	}
 	if session != nil {
@@ -131,6 +141,18 @@ type RequestError struct {
 	HTTPStatus int
 	Code       int
 	Message    string
+	// RetryAfter is how long Proton asked us to wait, when it said so.
+	RetryAfter time.Duration
+}
+
+// IsRateLimit reports whether err is a rate-limit refusal, from Proton or
+// from our own local cooldown.
+func IsRateLimit(err error) bool {
+	reqErr, ok := err.(*RequestError)
+	if !ok {
+		return false
+	}
+	return reqErr.HTTPStatus == 429 || reqErr.Code == 2028
 }
 
 func (e *RequestError) Error() string {
@@ -178,10 +200,14 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body, resul
 
 	for attempt := 0; attempt <= MaxRetries; attempt++ {
 		if attempt > 0 {
+			// Jittered: components that failed together must not come back
+			// together, or the retry itself arrives as a burst.
+			wait := time.Duration(attempt) * time.Second
+			wait += time.Duration(rand.Int63n(int64(wait / 2)))
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(time.Duration(attempt) * time.Second):
+			case <-time.After(wait):
 			}
 		}
 
@@ -205,9 +231,15 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body, resul
 				return fmt.Errorf("token refresh failed: %w (original: %w)", refreshErr, err)
 			}
 			continue
-		case 429, 503:
-			// Rate limited or unavailable. The Proton Drive integration rules
-			// require backoff here; the loop's linear delay provides it.
+		case 429:
+			// Never retried. A 429 means Proton has already told us to stop,
+			// and each further request extends the limit rather than
+			// shortening it — one call used to become four in six seconds.
+			// The shared limiter has armed a cooldown; the caller decides
+			// when to come back.
+			return err
+
+		case 503:
 			continue
 		default:
 			return err
@@ -257,11 +289,24 @@ func (c *Client) doSingleRequest(ctx context.Context, method, path string, body,
 	}
 
 	if resp.StatusCode >= 400 {
+		var retryAfter time.Duration
+		if resp.StatusCode == http.StatusTooManyRequests {
+			retryAfter = ParseRetryAfter(resp.Header)
+			if retryAfter == 0 {
+				retryAfter = defaultCooldown
+			}
+		}
 		var apiErr APIError
 		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Code != 0 {
-			return &RequestError{HTTPStatus: resp.StatusCode, Code: apiErr.Code, Message: apiErr.Error}
+			return &RequestError{
+				HTTPStatus: resp.StatusCode, Code: apiErr.Code,
+				Message: apiErr.Error, RetryAfter: retryAfter,
+			}
 		}
-		return &RequestError{HTTPStatus: resp.StatusCode, Message: string(respBody)}
+		return &RequestError{
+			HTTPStatus: resp.StatusCode, Message: string(respBody),
+			RetryAfter: retryAfter,
+		}
 	}
 
 	if result != nil {
@@ -272,8 +317,26 @@ func (c *Client) doSingleRequest(ctx context.Context, method, path string, body,
 	return nil
 }
 
+// minRefreshInterval is the shortest gap between two refreshes. If a request
+// gets a 401 within this window of a successful refresh, the token is as
+// fresh as it can be and the session is genuinely dead — refreshing again
+// cannot help and only spends another single-use token.
+const minRefreshInterval = 10 * time.Second
+
 // refreshTokens exchanges the refresh token for a new token pair.
 func (c *Client) refreshTokens(ctx context.Context) error {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+
+	// Another caller may have refreshed while we waited for the lock; if so
+	// our 401 is already stale and there is nothing to do.
+	c.mu.RLock()
+	since := time.Since(c.lastRefresh)
+	c.mu.RUnlock()
+	if !c.lastRefresh.IsZero() && since < minRefreshInterval {
+		return nil
+	}
+
 	c.mu.RLock()
 	refreshToken := c.refreshToken
 	uid := c.uid
@@ -298,6 +361,7 @@ func (c *Client) refreshTokens(ctx context.Context) error {
 	c.mu.Lock()
 	c.accessToken = result.AccessToken
 	c.refreshToken = result.RefreshToken
+	c.lastRefresh = time.Now()
 	c.mu.Unlock()
 
 	if c.OnTokenRefresh != nil {

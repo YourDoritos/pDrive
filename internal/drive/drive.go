@@ -109,9 +109,14 @@ func Open(ctx context.Context, opts Options) (*Drive, error) {
 	// encrypted; the bridge's cache is not.
 	cfg.CredentialCacheFile = ""
 
-	// PDRIVE_TRACE=1 logs every HTTP request, including the bridge's
-	// otherwise-opaque bootstrap.
-	cfg.Transport = newTracingTransport(nil)
+	// Through the shared limiter, so the bridge observes the same cooldown
+	// our own client does. Proton limits per account and IP, and every
+	// Proton service sits behind that gateway — a loop here can lock the
+	// user out of Mail and Pass too.
+	//
+	// PDRIVE_TRACE=1 logs every request, including the bridge's otherwise
+	// opaque bootstrap.
+	cfg.Transport = api.SharedLimiter.Transport(newTracingTransport(nil))
 
 	cfg.UseReusableLogin = true
 	cfg.ReusableCredential = &common.ReusableCredentialData{

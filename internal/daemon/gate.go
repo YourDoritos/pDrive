@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YourDoritos/pdrive/internal/api"
 	"github.com/YourDoritos/pdrive/internal/gate"
 	"github.com/YourDoritos/pdrive/internal/mirror"
 )
@@ -126,6 +127,13 @@ func (d *Daemon) runGateSession(ctx context.Context) bool {
 // Concurrent listings share one pass rather than each starting their own.
 func (d *Daemon) refreshForListing(ctx context.Context, openedPath string) {
 	if d.IsPaused() {
+		return
+	}
+	// One request per directory opened is the whole point of the gate, and
+	// it is exactly the shape that sustains a rate limit: a user who keeps
+	// typing ls keeps the window open forever. While limited, the listing is
+	// released unrefreshed.
+	if api.SharedLimiter.Limited() {
 		return
 	}
 	if d.Fresh() {

@@ -306,6 +306,13 @@ func (d *Daemon) runSync(ctx context.Context, req syncRequest) syncOutcome {
 	if d.IsPaused() && req.trigger != TriggerManual {
 		return syncOutcome{}
 	}
+	// An automatic pass during a cooldown cannot succeed and would extend
+	// it. A manual one is a person asking, and is allowed to fail loudly.
+	if wait := api.SharedLimiter.LimitedFor(); wait > 0 && req.trigger != TriggerManual {
+		d.log.Debugf("rate limited by Proton; skipping %s sync for %s",
+			req.trigger, wait.Round(time.Second))
+		return syncOutcome{}
+	}
 
 	d.setState(StateSyncing)
 	d.publish(ipc.EventSyncStarted, nil)
@@ -405,6 +412,13 @@ func (d *Daemon) pollLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+			// While rate limited, do not even schedule work. Requests
+			// arriving during a cooldown extend it, so a poller that keeps
+			// firing is how a temporary limit becomes a permanent one.
+			if wait := api.SharedLimiter.LimitedFor(); wait > 0 {
+				timer.Reset(wait + time.Second)
+				continue
+			}
 			if !d.IsPaused() {
 				d.Trigger(TriggerPoll)
 			}
@@ -504,6 +518,13 @@ func (d *Daemon) Status() ipc.StatusData {
 		st.LastSync = d.lastSync.Format(time.RFC3339)
 	}
 	d.mu.RUnlock()
+
+	// Surface a cooldown rather than looking idle: an account-wide limit
+	// affects Mail and Pass too, and a user seeing "up to date" while
+	// nothing syncs has no way to understand why.
+	if wait := api.SharedLimiter.LimitedFor(); wait > 0 {
+		st.RateLimitedFor = int(wait.Round(time.Second).Seconds())
+	}
 
 	if stats, err := d.db.Stats(); err == nil {
 		st.Files, st.Dirs, st.Stubs = stats.Files, stats.Dirs, stats.Stubs

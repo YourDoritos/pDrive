@@ -131,6 +131,12 @@ func (m StatusModel) View() string {
 }
 
 func (m StatusModel) renderState(st *ipc.StatusData) string {
+	// A rate limit is account-wide at Proton — it affects Mail and Pass too —
+	// so it must be visible rather than looking like an idle client.
+	if st.RateLimitedFor > 0 {
+		return StyleWarning.Render(fmt.Sprintf("waiting — Proton asked us to slow down (%ds)",
+			st.RateLimitedFor))
+	}
 	if m.syncing && st.State != "paused" && st.State != "error" {
 		frame := spinnerFrames[m.spinner%len(spinnerFrames)]
 		return lipgloss.NewStyle().Foreground(ColorAccent).Render(frame + " syncing")

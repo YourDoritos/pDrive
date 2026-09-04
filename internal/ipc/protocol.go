@@ -104,7 +104,9 @@ type StatusData struct {
 	LastError  string `json:"last_error,omitempty"`
 	GateActive bool   `json:"gate_active"`
 	Uptime     string `json:"uptime,omitempty"`
-	Pending    int    `json:"pending,omitempty"`
+	// RateLimitedFor is seconds remaining on a Proton rate-limit cooldown.
+	RateLimitedFor int `json:"rate_limited_for,omitempty"`
+	Pending        int `json:"pending,omitempty"`
 }
 
 // SyncData summarises a completed pass.

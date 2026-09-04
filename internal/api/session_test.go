@@ -1,11 +1,17 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -254,5 +260,46 @@ func TestSessionSaltIsStable(t *testing.T) {
 	if string(key) != string(want) {
 		t.Error("the session encryption salt changed — every existing session " +
 			"file is now undecryptable and every user must log in again")
+	}
+}
+
+// Refresh tokens are single-use and rotate. Two concurrent refreshes race and
+// the loser replays an already-spent token, which Proton reads as token reuse
+// — a session-compromise signal that counts hard against the auth limit.
+func TestRefreshIsSingleFlight(t *testing.T) {
+	var refreshes atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v4/refresh" {
+			refreshes.Add(1)
+			time.Sleep(50 * time.Millisecond) // long enough for others to pile up
+			w.Write([]byte(`{"Code":1000,"AccessToken":"new","RefreshToken":"new2","UID":"u"}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"Code":401,"Error":"unauthorized"}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		baseURL:      srv.URL,
+		httpClient:   srv.Client(),
+		uid:          "u",
+		accessToken:  "old",
+		refreshToken: "old2",
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = c.refreshTokens(context.Background())
+		}()
+	}
+	wg.Wait()
+
+	if n := refreshes.Load(); n != 1 {
+		t.Errorf("eight concurrent callers produced %d refreshes, want 1 "+
+			"(the rest would replay a spent token)", n)
 	}
 }
