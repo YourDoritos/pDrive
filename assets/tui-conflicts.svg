@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="817" height="578" viewBox="0 0 817 578" font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace" font-size="14.0">
-<rect x="0" y="0" width="817" height="578" rx="10" fill="#14141f"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="817" height="632" viewBox="0 0 817 632" font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace, Noto Color Emoji, Apple Color Emoji, Segoe UI Emoji" font-size="14.0">
+<rect x="0" y="0" width="817" height="632" rx="10" fill="#14141f"/>
 <rect x="0" y="0" width="817" height="28" rx="10" fill="#1d1d2b"/>
 <rect x="0" y="10" width="817" height="18" fill="#1d1d2b"/>
 <circle cx="18.0" cy="14.0" r="5" fill="#ff5f57"/>
@@ -59,7 +59,7 @@
 <text x="710.80" y="346.00" fill="#6d49ff" xml:space="preserve">│</text>
 <text x="97.60" y="364.00" fill="#6d49ff" xml:space="preserve">│</text>
 <text x="122.80" y="364.00" fill="#e8e8e8" xml:space="preserve">    cd /home/you/pdrive</text>
-<text x="618.40" y="364.00" fill="#6d49ff" xml:space="preserve">│</text>
+<text x="710.80" y="364.00" fill="#6d49ff" xml:space="preserve">│</text>
 <text x="97.60" y="382.00" fill="#6d49ff" xml:space="preserve">│</text>
 <text x="122.80" y="382.00" fill="#e8e8e8" xml:space="preserve">    diff &quot;budget.ods&quot; \</text>
 <text x="710.80" y="382.00" fill="#6d49ff" xml:space="preserve">│</text>

@@ -36,6 +36,7 @@ type shot struct {
 	title   string
 	caption string
 	body    string
+	align   vAlign
 }
 
 func main() {
@@ -51,7 +52,7 @@ func main() {
 	}
 
 	for _, s := range shots() {
-		svg := renderSVG(s.title, parseANSI(s.body))
+		svg := renderSVG(s.title, parseANSI(s.body), s.align)
 		path := filepath.Join(*out, s.name+".svg")
 		if err := os.WriteFile(path, []byte(svg), 0644); err != nil {
 			fail(err)
@@ -134,20 +135,38 @@ func shots() []shot {
 
 	return []shot{
 		{"tui-status", "pdrive — status", "account, storage and freshness",
-			withNav(tui.ViewStatus, 1, status.View())},
+			withNav(tui.ViewStatus, 1, status.View()), alignTop},
 		{"tui-activity", "pdrive — activity", "live transfers over a durable history",
-			withNav(tui.ViewActivity, 1, activity.View())},
+			withNav(tui.ViewActivity, 1, activity.View()), alignTop},
 		{"tui-conflicts", "pdrive — conflicts", "both versions kept, never overwritten",
 			// The panel prints the folder it was given, and that is a
 			// throwaway directory here. Show the path a user would have.
-			strings.ReplaceAll(
+			substituteRoot(
 				withNav(tui.ViewConflicts, 1, conflicts.View()),
-				conflictRoot, demoRoot)},
+				conflictRoot, demoRoot), alignTop},
 		{"tui-settings", "pdrive — settings", "every knob, no config file needed",
-			withNav(tui.ViewSettings, 1, settings.View())},
+			withNav(tui.ViewSettings, 1, settings.View()), alignTop},
+		// No tab bar above the login form, so nothing to top-align it with.
 		{"tui-login", "pdrive — sign in", "SRP with 2FA, session stored encrypted",
-			login.View()},
+			login.View(), alignMiddle},
 	}
+}
+
+// substituteRoot swaps the staging directory for the path a user would have.
+//
+// The screen is already rendered and padded when this runs, so a plain
+// ReplaceAll shortens whichever row carries the path and leaves the panel's
+// right border adrift on that one row — it sat 11 columns in for exactly as
+// long as the substitution was a bare ReplaceAll. Pad the replacement back to
+// the original display width so every row still ends in the same column.
+func substituteRoot(s, from, to string) string {
+	pad := lipgloss.Width(from) - lipgloss.Width(to)
+	if pad < 0 {
+		// Would push the border out instead of pulling it in; there is no
+		// padding that fixes that, so say so rather than ship a broken box.
+		fail(fmt.Errorf("substituteRoot: %q is wider than the staging path %q", to, from))
+	}
+	return strings.ReplaceAll(s, from, to+strings.Repeat(" ", pad))
 }
 
 // stageConflict creates a throwaway directory holding the preserved copy, so

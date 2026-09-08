@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -17,7 +18,62 @@ const (
 	titleH  = 28.0
 	bgColor = "#14141f"
 	fgColor = "#e8e8e8"
+
+	// A colour emoji face has to be in the stack or country flags — pairs of
+	// regional indicator codepoints — render as tofu boxes in the output.
+	// The monospace faces come first so ordinary text is unaffected.
+	fontFamily = "JetBrainsMono Nerd Font, JetBrains Mono, monospace, " +
+		"Noto Color Emoji, Apple Color Emoji, Segoe UI Emoji"
 )
+
+// Every screenshot is drawn in the same frame, whatever the screen has to
+// say, so the four windows in the README grid are the same size instead of
+// one being visibly taller than its neighbour. frameRows is the tallest
+// screen (conflicts) with a little headroom; frameCols matches the width the
+// models are rendered at.
+const (
+	frameCols = 92
+	frameRows = 32
+)
+
+// vAlign says where a screen sits inside the fixed frame.
+type vAlign int
+
+const (
+	// alignTop is for screens under the tab bar. The TUI centres itself
+	// vertically in a real terminal, but centring here puts the tab bar at a
+	// different height in every window, and four windows side by side then
+	// read as four different programs.
+	alignTop vAlign = iota
+	// alignMiddle is for screens with no tab bar above them — the login
+	// form — which have no chrome to line up with and look dropped if they
+	// are pinned to the top of an otherwise empty window.
+	alignMiddle
+)
+
+// fitFrame trims a screen down to its content and then places it in the
+// fixed frame according to align.
+func fitFrame(grid [][]cell, align vAlign) [][]cell {
+	grid = trimBlankEdges(grid)
+	// One blank row top and bottom, so content is never flush to the frame.
+	grid = append([][]cell{nil}, append(grid, nil)...)
+
+	if len(grid) > frameRows {
+		fmt.Fprintf(os.Stderr,
+			"screenshot: a screen needs %d rows but frameRows is %d; "+
+				"raise it, or this window will be taller than the others\n",
+			len(grid), frameRows)
+		return grid
+	}
+
+	top := 0
+	if align == alignMiddle {
+		top = (frameRows - len(grid)) / 2
+	}
+	out := make([][]cell, frameRows)
+	copy(out[top:], grid)
+	return out
+}
 
 // trimBlankEdges drops fully blank rows from the top and bottom.
 //
@@ -56,19 +112,14 @@ func trimBlankEdges(grid [][]cell) [][]cell {
 }
 
 // renderSVG draws a terminal window containing the given screen.
-func renderSVG(title string, grid [][]cell) string {
-	grid = trimBlankEdges(grid)
-	// One blank row top and bottom, so the content is not flush to the frame.
-	grid = append([][]cell{nil}, append(grid, nil)...)
+func renderSVG(title string, grid [][]cell, align vAlign) string {
+	grid = fitFrame(grid, align)
 
-	cols := 0
+	cols := frameCols
 	for _, line := range grid {
 		if n := len(line); n > cols {
 			cols = n
 		}
-	}
-	if cols < 40 {
-		cols = 40
 	}
 
 	w := float64(cols)*cellW + 2*padX
@@ -76,8 +127,8 @@ func renderSVG(title string, grid [][]cell) string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" `+
-		`viewBox="0 0 %.0f %.0f" font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace" `+
-		"font-size=\"%.1f\">\n", w, h, w, h, fontPx)
+		`viewBox="0 0 %.0f %.0f" font-family="%s" `+
+		"font-size=\"%.1f\">\n", w, h, w, h, fontFamily, fontPx)
 
 	// Window frame.
 	fmt.Fprintf(&b, `<rect x="0" y="0" width="%.0f" height="%.0f" rx="%.0f" fill="%s"/>`+"\n",
