@@ -173,15 +173,15 @@ var DisclosureLines = []string{
 }
 
 // QuotaBar renders a proportional usage bar.
-func QuotaBar(used, max int64, width int) string {
+func QuotaBar(used, total int64, width int) string {
 	if width < 4 {
 		width = 4
 	}
-	if max <= 0 {
+	if total <= 0 {
 		return lipgloss.NewStyle().Foreground(ColorFgDim).Render(repeat("░", width))
 	}
 
-	ratio := float64(used) / float64(max)
+	ratio := float64(used) / float64(total)
 	if ratio > 1 {
 		ratio = 1
 	}

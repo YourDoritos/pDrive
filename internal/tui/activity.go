@@ -126,11 +126,11 @@ func (m *ActivityModel) trim() {
 // ScrollUp moves back through the history.
 func (m *ActivityModel) ScrollUp(n int) {
 	m.offset += n
-	if max := len(m.lines) - 1; m.offset > max {
-		if max < 0 {
-			max = 0
+	if top := len(m.lines) - 1; m.offset > top {
+		if top < 0 {
+			top = 0
 		}
-		m.offset = max
+		m.offset = top
 	}
 }
 

@@ -44,8 +44,6 @@ type settingRow struct {
 	value func(*config.Config) string
 	// cycle advances to the next choice.
 	cycle func(*config.Config)
-	// restart marks settings that only take effect after a daemon restart.
-	restart bool
 }
 
 var settingRows = []settingRow{

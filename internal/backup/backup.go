@@ -182,7 +182,7 @@ func Run(ctx context.Context, d *drive.Drive, opts Options) (*Manifest, error) {
 		entry.DigestMatch = compareDigest(sum, n.Digest)
 		if entry.DigestMatch == "mismatch" {
 			opts.emit(Event{Kind: EventWarn, Path: n.Path,
-				Err: fmt.Errorf("Proton's digest %s does not match downloaded content %s", n.Digest, sum)})
+				Err: fmt.Errorf("digest mismatch: Proton reports %s, downloaded content hashes to %s", n.Digest, sum)})
 		}
 
 		manifest.Files++

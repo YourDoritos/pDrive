@@ -2,16 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -19,23 +19,37 @@ jobs:
       - name: Build
         run: make build
 
-      - name: Test
-        run: make test
-
       - name: Vet
         run: go vet ./...
 
+      - name: Test
+        run: go test ./...
+
+      - name: Race tests
+        run: go test -race ./...
+
+      # Vendored upstream code is checked as-is, so gofmt runs over our own
+      # files only. See third_party/VENDOR.md.
       - name: Formatting
         run: make fmtcheck
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: go mod tidy check
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: golangci-lint
+        # The action must install golangci-lint v2.x, which is what our
+        # .golangci.yml targets. v6 of the action pulled the latest v1.x,
+        # built with Go 1.24, which refuses to run against our go 1.26
+        # module. Pin an explicit linter version too so "latest" can't
+        # silently break CI the same way: v2.12.2 is built with go1.26 and
+        # is the version this config is verified against locally.
+        uses: golangci/golangci-lint-action@v9
         with:
-          go-version-file: go.mod
-          cache: true
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+          version: v2.12.2
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

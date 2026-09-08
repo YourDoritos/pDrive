@@ -116,8 +116,8 @@ func (m *Mirror) checkDeletionCliff(deletions int) error {
 // materializedFor reports whether a node of this size should be downloaded
 // or left as a stub, per sync.max_auto_download_size.
 func (m *Mirror) materializedFor(size int64) state.Materialization {
-	cap := m.cfg.Sync.MaxAutoDownloadSize
-	if cap <= 0 || size <= cap {
+	maxAuto := m.cfg.Sync.MaxAutoDownloadSize
+	if maxAuto <= 0 || size <= maxAuto {
 		return state.Materialized
 	}
 	return state.NotMaterialized

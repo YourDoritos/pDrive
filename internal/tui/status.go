@@ -218,14 +218,14 @@ func orDash(s string) string {
 	return s
 }
 
-func truncate(s string, max int) string {
-	if max < 8 {
-		max = 8
+func truncate(s string, maxLen int) string {
+	if maxLen < 8 {
+		maxLen = 8
 	}
-	if len(s) <= max {
+	if len(s) <= maxLen {
 		return s
 	}
-	return s[:max-1] + "…"
+	return s[:maxLen-1] + "…"
 }
 
 func relTime(s string) string {

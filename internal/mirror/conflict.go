@@ -5,8 +5,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/YourDoritos/pdrive/internal/state"
 )
 
 // preserveLocalIfConflicting saves a locally-edited file before the pull
@@ -77,20 +75,4 @@ func (m *Mirror) preserveLocalIfConflicting(path, incomingHash string) error {
 	m.result.Conflicts++
 	m.emit(Event{Kind: EventConflict, Path: path + " -> kept local copy as " + keep})
 	return nil
-}
-
-// locallyModified reports whether the pre-pull scan saw this path differing
-// from the baseline.
-func (m *Mirror) locallyModified(path string, base *state.Node) bool {
-	before, seen := m.localBefore[path]
-	if !seen || before == nil || before.IsDir {
-		return false
-	}
-	if base == nil {
-		return true // present locally, never agreed on
-	}
-	if before.Hash == "" || base.ContentHash == "" {
-		return false
-	}
-	return !strings.EqualFold(before.Hash, base.ContentHash)
 }
