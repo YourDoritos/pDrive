@@ -115,7 +115,7 @@ func SocketPath() string {
 }
 
 // GateSocketPath returns the pdrive-gate socket path (owned by root).
-func GateSocketPath() string { return "/run/pdrive-gate.sock" }
+func GateSocketPath() string { return "/run/pdrive-gate/gate.sock" }
 
 // EnsureDirs creates every directory pDrive needs, mode 0700.
 func EnsureDirs() error {

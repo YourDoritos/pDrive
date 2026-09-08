@@ -528,7 +528,7 @@ pdrive/
 | Local trash | `~/.local/share/pdrive/trash/` |
 | Logs | `~/.local/state/pdrive/pdrive.log` (rotated) |
 | Scratch | `~/pdrive/.pdrive-tmp/` (same fs -> atomic rename) |
-| Sockets | `$XDG_RUNTIME_DIR/pdrive.sock`, `/run/pdrive-gate.sock` |
+| Sockets | `$XDG_RUNTIME_DIR/pdrive.sock`, `/run/pdrive-gate/gate.sock` |
 
 ---
 
@@ -805,11 +805,15 @@ Also: thumbnails, photos/albums, share links, multiple shares.
 ## Build & Run
 
 ```bash
-make build           # static binaries into ./bin
-make install         # binaries + systemd units + linger
-sudo systemctl enable --now pdrive-gate     # optional, for blocking freshness
-pDrive               # TUI
-pdrivectl status     # scriptable
+make build                # static binaries into ./bin
+make install              # binaries + the pdrived user unit, into ~/.local
+pdrive                    # TUI — log in first; pdrived exits without a session
+systemctl --user enable --now pdrived
+loginctl enable-linger "$USER"
+pdrivectl status          # scriptable
+
+sudo make install-gate                    # optional, for blocking freshness
+sudo systemctl enable --now pdrive-gate
 ```
 
 ## References

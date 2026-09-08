@@ -97,4 +97,9 @@ func (c *Conn) Recv() (*Message, error) {
 func (c *Conn) Close() error { return c.raw.Close() }
 
 // SocketPath is where the gate listens.
-const SocketPath = "/run/pdrive-gate.sock"
+//
+// It sits inside the unit's RuntimeDirectory rather than directly in /run:
+// the gate runs under ProtectSystem=strict, which leaves /run read-only, so
+// a socket at /run/pdrive-gate.sock could not be created at all. Systemd
+// creates and cleans up /run/pdrive-gate/ for us.
+const SocketPath = "/run/pdrive-gate/gate.sock"

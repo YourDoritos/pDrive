@@ -29,7 +29,12 @@ RestrictSUIDSGID=true
 RestrictRealtime=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
+
+# ProtectSystem=strict leaves /run read-only, so the socket lives inside the
+# runtime directory systemd creates for us, at /run/pdrive-gate/gate.sock.
+# 0755 so an unprivileged pdrived can traverse in and connect.
 RuntimeDirectory=pdrive-gate
+RuntimeDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target

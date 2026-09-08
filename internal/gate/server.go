@@ -65,6 +65,15 @@ func (s *Server) Close() {
 
 // Listen accepts daemon connections on the gate socket.
 func (s *Server) Listen(ctx context.Context, socketPath string) error {
+	// Under the packaged unit systemd has already created this directory via
+	// RuntimeDirectory=. Create it anyway so `sudo pdrive-gate` works when
+	// run by hand, outside systemd. 0755: unprivileged daemons have to
+	// traverse it to reach the socket.
+	if dir := filepath.Dir(socketPath); dir != "." && dir != "/" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
 	_ = os.Remove(socketPath)
 
 	ln, err := net.Listen("unix", socketPath)
