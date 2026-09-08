@@ -78,25 +78,47 @@ watching /home/you/pdrive (daemon idle) — ctrl+c to stop
   optional helper that makes directory listings wait until they are current.
   Everything else runs entirely as your own user.
 
+**NOT required** (unlike Proton's official Drive clients):
+
+- **root** — `pdrived`, `pdrive` and `pdrivectl` run as you, install into
+  `~/.local/bin`, and talk over a socket in your own `$XDG_RUNTIME_DIR`.
+  `pdrive-gate` is the single privileged component, and it is optional.
+- **Python, Electron, or any GUI stack** — pure Go binaries.
+- **FUSE, or a kernel module** — pDrive syncs real files into a real
+  directory. Nothing is mounted, so your files survive the daemon dying.
+- **rclone or the official `proton-drive` CLI** — pDrive talks to the Drive
+  API directly, including the per-block verification uploads need.
+
 ## Install
 
-### Build from source
+### One-liner (any Linux distro)
 
 ```bash
-git clone https://github.com/YourDoritos/pDrive.git
-cd pDrive
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/YourDoritos/pDrive/main/install.sh | bash
 ```
 
-This builds the binaries, installs them to `~/.local/bin`, and installs the
-`pdrived` user unit. Nothing here needs root.
+This fetches the latest prebuilt binaries from the GitHub release, verifies
+checksums, installs them to `~/.local/bin`, and installs the `pdrived` user
+unit. **No `sudo`** — the daemon runs as you.
+
+Pin a specific version:
+
+```bash
+PDRIVE_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/YourDoritos/pDrive/main/install.sh | bash
+```
+
+Then, in that order — the daemon exits with `not logged in` if you start it
+before the first login, so it is not enabled for you:
 
 ```bash
 pdrive                                  # log in
-systemctl --user daemon-reload
 systemctl --user enable --now pdrived
 loginctl enable-linger "$USER"          # keep syncing when logged out
 ```
+
+> [!NOTE]
+> `~/.local/bin` has to be on your `PATH`. The installer says so if it is
+> not; most distributions put it there already.
 
 ### AUR (Arch Linux)
 
@@ -106,14 +128,30 @@ Not published yet. `dist/PKGBUILD` is in the repository and builds today:
 cd dist && makepkg -si
 ```
 
+### Build from source
+
+Requires Go 1.26+ (see `go.mod`).
+
+```bash
+git clone https://github.com/YourDoritos/pDrive.git
+cd pDrive
+./install.sh --from-source
+# equivalently: make install
+```
+
 ### The listing gate (optional, needs root)
 
 Without it, pDrive checks for changes on a timer. With it, opening a folder
 waits until that folder is current.
 
 ```bash
-./install.sh --with-gate
-# or, from an installed package:
+# alongside either install method above
+curl -fsSL https://raw.githubusercontent.com/YourDoritos/pDrive/main/install.sh | bash -s -- --with-gate
+
+# from a clone
+./install.sh --from-source --with-gate
+
+# or, from an installed package
 sudo systemctl enable --now pdrive-gate
 ```
 
@@ -123,11 +161,18 @@ and it fails open on every error path. Stopping it is always safe.
 ### Uninstall
 
 ```bash
+# One-liner (keeps settings and sync state; add --purge to wipe them)
+curl -fsSL https://raw.githubusercontent.com/YourDoritos/pDrive/main/uninstall.sh | bash
+
+# AUR
+sudo pacman -Rns pdrive
+
+# From a clone
 ./uninstall.sh
 ```
 
-Your synced files, settings and local trash are left in place; your Proton
-Drive account is untouched.
+Your synced files in `~/pdrive` are never removed, not even by `--purge`, and
+your Proton Drive account is untouched.
 
 ## Build
 
@@ -157,6 +202,14 @@ pdrivectl conflicts           # list preserved local copies
 pdrivectl get <path>          # download a file left as a placeholder
 pdrive backup                 # separate verified archive of the account
 ```
+
+On first launch the TUI shows a login screen — SRP, with TOTP and
+two-password accounts supported. After that the session is saved and `pdrive`
+opens straight on Status.
+
+<p align="center">
+  <img src="assets/tui-login.png" alt="pDrive TUI — login" width="70%"/>
+</p>
 
 ### Keybindings
 

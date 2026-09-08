@@ -3,7 +3,20 @@
 /pdrived
 /pdrivectl
 /pdrive-gate
+/screenshot
 *.test
 /dist/*.pkg.tar.zst
 /dist/src/
 /dist/pkg/
+
+# Internal planning docs
+.planning/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store

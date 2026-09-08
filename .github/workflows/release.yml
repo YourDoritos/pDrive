@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build static binaries (amd64 + arm64)
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          for arch in amd64 arm64; do
+            for bin in pdrive pdrived pdrivectl pdrive-gate; do
+              CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+                go build -ldflags "${LDFLAGS}" -o ${bin}-linux-${arch} ./cmd/${bin}
+            done
+          done
+
+      - name: Generate checksums
+        run: sha256sum pdrive-linux-* pdrived-linux-* pdrivectl-linux-* pdrive-gate-linux-* > SHA256SUMS
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            pdrive-linux-amd64
+            pdrived-linux-amd64
+            pdrivectl-linux-amd64
+            pdrive-gate-linux-amd64
+            pdrive-linux-arm64
+            pdrived-linux-arm64
+            pdrivectl-linux-arm64
+            pdrive-gate-linux-arm64
+            SHA256SUMS
+
+  aur-publish:
+    runs-on: ubuntu-latest
+    needs: release
+    # Only publish to AUR from the upstream repo — forks don't have the
+    # AUR_SSH_KEY secret and shouldn't push to the upstream AUR package.
+    if: github.repository == 'YourDoritos/pDrive'
+    env:
+      AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # The AUR package does not exist yet (README says so). Until the key
+      # is added as a secret this job is a no-op rather than a red release:
+      # `secrets` is not available in a job-level `if`, so the check has to
+      # happen in a step and gate the rest.
+      - name: Check for AUR credentials
+        id: check
+        run: |
+          if [ -z "${AUR_SSH_KEY}" ]; then
+            echo "AUR_SSH_KEY not set — skipping AUR publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up SSH for AUR
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${AUR_SSH_KEY}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<'SSHEOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          SSHEOF
+
+      - name: Clone AUR repo
+        if: steps.check.outputs.publish == 'true'
+        run: git clone ssh://aur@aur.archlinux.org/pdrive.git aur
+
+      - name: Sync PKGBUILD + install hook from repo and push
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+
+          # Repo is the source of truth — copy both files into the AUR clone.
+          cp dist/PKGBUILD       aur/PKGBUILD
+          cp dist/pdrive.install aur/pdrive.install
+
+          cd aur
+
+          # Pin to the tag being released, reset pkgrel.
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+
+          # Derive makedepends from the PKGBUILD rather than hand-copying it.
+          # AUR helpers resolve dependencies from .SRCINFO, so a stale value
+          # here tells a user their toolchain is new enough and then fails
+          # the build. (Drifted once in pVPN: go>=1.22 vs go>=1.26.)
+          MAKEDEPENDS=$(sed -n "s/^makedepends=(\(.*\))/\1/p" PKGBUILD | tr -d "'\"")
+          MAKEDEPENDS_LINES=""
+          for dep in ${MAKEDEPENDS}; do
+            MAKEDEPENDS_LINES="${MAKEDEPENDS_LINES}\tmakedepends = ${dep}\n"
+          done
+
+          # Regenerate .SRCINFO from scratch. We avoid `makepkg --printsrcinfo`
+          # (which would require installing base-devel in CI) by hand-writing
+          # the file — the schema is stable and matches what makepkg emits.
+          cat > .SRCINFO <<SRCINFO
+          pkgbase = pdrive
+          	pkgdesc = Proton Drive sync client with TUI for Linux (unofficial)
+          	pkgver = ${VERSION}
+          	pkgrel = 1
+          	url = https://github.com/YourDoritos/pDrive
+          	install = pdrive.install
+          	arch = x86_64
+          	arch = aarch64
+          	license = GPL-3.0-or-later
+          $(printf "${MAKEDEPENDS_LINES}")
+          	depends = glibc
+          	source = pdrive-${VERSION}.tar.gz::https://github.com/YourDoritos/pDrive/archive/v${VERSION}.tar.gz
+          	sha256sums = SKIP
+
+          pkgname = pdrive
+          SRCINFO
+
+          git config user.email "paul.goessmann@proton.me"
+          git config user.name "YourDoritos"
+          git add PKGBUILD pdrive.install .SRCINFO
+          git diff --cached --quiet && echo "No changes to publish" && exit 0
+          git commit -m "Update to v${VERSION}"
+          git push
