@@ -122,7 +122,23 @@ loginctl enable-linger "$USER"          # keep syncing when logged out
 
 ### AUR (Arch Linux)
 
-Not published yet. `dist/PKGBUILD` is in the repository and builds today:
+```bash
+yay -S pdrive
+```
+
+Installs the binaries to `/usr/bin`, the `pdrived` user unit, and the
+optional `pdrive-gate` system unit. Neither unit is enabled for you —
+`pdrived` exits with `not logged in` if it starts before your first login,
+so log in first:
+
+```bash
+pdrive                                  # log in
+systemctl --user enable --now pdrived
+loginctl enable-linger "$USER"          # keep syncing when logged out
+```
+
+The `PKGBUILD` in `dist/` is the same one the AUR package is built from, if
+you would rather build it yourself:
 
 ```bash
 cd dist && makepkg -si

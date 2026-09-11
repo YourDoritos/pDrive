@@ -60,10 +60,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The AUR package does not exist yet (README says so). Until the key
-      # is added as a secret this job is a no-op rather than a red release:
-      # `secrets` is not available in a job-level `if`, so the check has to
-      # happen in a step and gate the rest.
+      # Without the key this job is a no-op rather than a red release, which
+      # is what a fork gets: `secrets` is not available in a job-level `if`,
+      # so the check has to happen in a step and gate the rest.
       - name: Check for AUR credentials
         id: check
         run: |
