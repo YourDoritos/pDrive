@@ -142,4 +142,7 @@ jobs:
           git add PKGBUILD pdrive.install .SRCINFO
           git diff --cached --quiet && echo "No changes to publish" && exit 0
           git commit -m "Update to v${VERSION}"
-          git push
+          # Explicit refspec: the AUR only serves "master", and on the first
+          # release this clone is of a repository that does not exist yet, so
+          # there is no upstream branch to infer one from.
+          git push origin HEAD:master
